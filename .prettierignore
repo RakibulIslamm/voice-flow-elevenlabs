@@ -1,0 +1,9 @@
+.next
+node_modules
+public
+pnpm-lock.yaml
+.vercel
+.turbo
+coverage
+build
+out
