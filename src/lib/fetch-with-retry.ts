@@ -1,5 +1,24 @@
 import { ExternalServiceError } from '@/lib/errors';
 
+/**
+ * Wraps `fetch` with timeout + exponential-backoff retries, raising
+ * `ExternalServiceError` on terminal failure. Every external API call should
+ * go through this so failures stay categorized and observable.
+ *
+ * ⚠️  Serverless / Vercel function budget:
+ * The total wall time of a single call can reach
+ *   `timeoutMs * (maxRetries + 1) + backoff * maxRetries`
+ * Defaults (15 000 ms × 4 attempts) can exceed the Vercel **Hobby** limit
+ * (10 s) and even strain **Pro** (60 s). When calling from a route handler /
+ * server action on Vercel, tune per call-site:
+ *
+ *   fetchWithRetry(url, { service: 'elevenlabs', timeoutMs: 2500, maxRetries: 2 })
+ *
+ * Budget heuristic:
+ *   Hobby  → keep `timeoutMs * (maxRetries + 1)` under ~7 s (leaves slack)
+ *   Pro    → keep it under ~45 s
+ *   Self-hosted → use defaults freely
+ */
 export type FetchWithRetryOptions = RequestInit & {
   service: string;
   timeoutMs?: number;

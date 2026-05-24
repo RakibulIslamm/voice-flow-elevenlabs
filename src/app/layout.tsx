@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/toaster';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { ErrorTelemetry } from '@/components/error-telemetry';
 
 const sans = Inter({
   subsets: ['latin'],
@@ -46,6 +47,7 @@ export default function RootLayout({
       <body suppressHydrationWarning className="min-h-full font-sans">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
           <ErrorBoundary>{children}</ErrorBoundary>
+          <ErrorTelemetry />
           <Toaster />
         </ThemeProvider>
       </body>

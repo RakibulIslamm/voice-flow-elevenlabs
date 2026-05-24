@@ -10,7 +10,8 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json,md}\" \"widget/**/*.{ts,tsx,css,json,md}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json,md}\" \"widget/**/*.{ts,tsx,css,json,md}\"",
     "typecheck": "tsc --noEmit",
-    "verify:phase-2": "cross-env NODE_OPTIONS=\"--require ./scripts/server-only-shim.cjs\" tsx --env-file .env.local scripts/verify-phase-2.ts"
+    "verify:phase-2": "cross-env NODE_OPTIONS=\"--require ./scripts/server-only-shim.cjs\" tsx --env-file .env.local scripts/verify-phase-2.ts",
+    "verify:prod": "node scripts/verify-prod.mjs"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.1.4",
