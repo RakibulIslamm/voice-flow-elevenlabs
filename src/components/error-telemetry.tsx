@@ -30,8 +30,12 @@ export function ErrorTelemetry() {
       post({
         message: event.message || 'window.onerror',
         stack: event.error instanceof Error ? event.error.stack : undefined,
-        url: `${window.location.href} @ ${event.filename}:${event.lineno}:${event.colno}`,
-        scope: 'window-error',
+        name: event.error instanceof Error ? event.error.name : 'WindowError',
+        context: {
+          url: window.location.href,
+          source: `${event.filename}:${event.lineno}:${event.colno}`,
+          scope: 'window-error',
+        },
       });
     };
 
@@ -40,8 +44,11 @@ export function ErrorTelemetry() {
       post({
         message: reason instanceof Error ? reason.message : String(reason ?? 'unhandledrejection'),
         stack: reason instanceof Error ? reason.stack : undefined,
-        url: window.location.href,
-        scope: 'unhandled-rejection',
+        name: reason instanceof Error ? reason.name : 'UnhandledRejection',
+        context: {
+          url: window.location.href,
+          scope: 'unhandled-rejection',
+        },
       });
     };
 

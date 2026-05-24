@@ -21,9 +21,12 @@ export class ErrorBoundary extends Component<Props, State> {
       body: JSON.stringify({
         message: error.message,
         stack: error.stack,
-        componentStack: info.componentStack ?? undefined,
-        url: typeof window !== 'undefined' ? window.location.href : undefined,
-        scope: 'react-error-boundary',
+        name: error.name,
+        context: {
+          componentStack: info.componentStack ?? undefined,
+          url: typeof window !== 'undefined' ? window.location.href : undefined,
+          scope: 'react-error-boundary',
+        },
       }),
       keepalive: true,
     }).catch(() => {

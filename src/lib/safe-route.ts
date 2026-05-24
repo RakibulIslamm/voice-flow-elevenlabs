@@ -2,6 +2,7 @@ import 'server-only';
 import { NextResponse, type NextRequest } from 'next/server';
 import { ZodError, type ZodType } from 'zod';
 import { isAppError, RateLimitError } from '@/lib/errors';
+import { logError } from '@/lib/tracking/log-error';
 
 export type SafeRouteOptions<Input> = {
   schema?: ZodType<Input>;
@@ -37,8 +38,12 @@ export function safeRoute<Input = unknown>(opts: SafeRouteOptions<Input>) {
 
       if (isAppError(e)) {
         if (e.statusCode >= 500) {
-          // TODO(phase-3): persist to ErrorLog
-          console.error('[safeRoute] AppError 5xx', { code: e.code, message: e.message });
+          await logError(e, {
+            source: 'safeRoute',
+            code: e.code,
+            path: req.nextUrl?.pathname,
+            method: req.method,
+          });
         }
         const headers: Record<string, string> = {};
         if (e instanceof RateLimitError && typeof e.retryAfterSeconds === 'number') {
@@ -50,8 +55,11 @@ export function safeRoute<Input = unknown>(opts: SafeRouteOptions<Input>) {
         );
       }
 
-      // TODO(phase-3): persist to ErrorLog (unexpected)
-      console.error('[safeRoute] unexpected', e);
+      await logError(e, {
+        source: 'safeRoute',
+        path: req.nextUrl?.pathname,
+        method: req.method,
+      });
       return NextResponse.json(
         { ok: false, error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' } },
         { status: 500 },

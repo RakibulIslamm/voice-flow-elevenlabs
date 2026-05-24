@@ -16,9 +16,12 @@ export default function GlobalError({
       body: JSON.stringify({
         message: error.message,
         stack: error.stack,
-        digest: error.digest,
-        url: typeof window !== 'undefined' ? window.location.href : undefined,
-        scope: 'global-error',
+        name: error.name,
+        context: {
+          digest: error.digest,
+          url: typeof window !== 'undefined' ? window.location.href : undefined,
+          scope: 'global-error',
+        },
       }),
       keepalive: true,
     }).catch(() => {});

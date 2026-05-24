@@ -1,6 +1,7 @@
 import 'server-only';
 import { ZodError, type ZodType } from 'zod';
 import { isAppError } from '@/lib/errors';
+import { logError } from '@/lib/tracking/log-error';
 
 export type ActionError = {
   code: string;
@@ -33,8 +34,7 @@ export function safeAction<Input, Output>(
           error: { code: 'VALIDATION_ERROR', message: 'Invalid input.', fields },
         };
       }
-      // TODO(phase-3): persist to ErrorLog (parse failure)
-      console.error('[safeAction] parse failure', e);
+      await logError(e, { source: 'safeAction', stage: 'parse' }, { severity: 'medium' });
       return { ok: false, error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' } };
     }
 
@@ -44,13 +44,11 @@ export function safeAction<Input, Output>(
     } catch (e) {
       if (isAppError(e)) {
         if (e.statusCode >= 500) {
-          // TODO(phase-3): persist to ErrorLog
-          console.error('[safeAction] AppError 5xx', { code: e.code, message: e.message });
+          await logError(e, { source: 'safeAction', code: e.code });
         }
         return { ok: false, error: { code: e.code, message: e.publicMessage } };
       }
-      // TODO(phase-3): persist to ErrorLog (unexpected)
-      console.error('[safeAction] unexpected', e);
+      await logError(e, { source: 'safeAction', stage: 'handler' });
       return { ok: false, error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' } };
     }
   };

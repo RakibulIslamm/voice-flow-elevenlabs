@@ -18,9 +18,12 @@ export default function RouteError({
       body: JSON.stringify({
         message: error.message,
         stack: error.stack,
-        digest: error.digest,
-        url: typeof window !== 'undefined' ? window.location.href : undefined,
-        scope: 'route-error',
+        name: error.name,
+        context: {
+          digest: error.digest,
+          url: typeof window !== 'undefined' ? window.location.href : undefined,
+          scope: 'route-error',
+        },
       }),
       keepalive: true,
     }).catch(() => {});
