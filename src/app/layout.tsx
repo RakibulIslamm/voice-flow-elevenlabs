@@ -37,8 +37,9 @@ export default function RootLayout({
     <html
       lang="en"
       className={cn('h-full antialiased', sans.variable, serif.variable, mono.variable)}
+      suppressHydrationWarning
     >
-      <body className="min-h-full font-sans">{children}</body>
+      <body suppressHydrationWarning className="min-h-full font-sans">{children}</body>
     </html>
   );
 }
