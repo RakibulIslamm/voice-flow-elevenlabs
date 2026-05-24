@@ -9,7 +9,8 @@
     "lint": "cross-env MallocNanoZone= eslint",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json,md}\" \"widget/**/*.{ts,tsx,css,json,md}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json,md}\" \"widget/**/*.{ts,tsx,css,json,md}\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:phase-2": "cross-env NODE_OPTIONS=\"--require ./scripts/server-only-shim.cjs\" tsx --env-file .env.local scripts/verify-phase-2.ts"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.1.4",
@@ -24,6 +25,7 @@
     "radix-ui": "^1.4.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "server-only": "^0.0.1",
     "shadcn": "^4.8.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
@@ -41,6 +43,7 @@
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "tailwindcss": "^4",
+    "tsx": "^4.22.3",
     "typescript": "^5"
   }
 }

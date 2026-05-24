@@ -1,7 +1,11 @@
 import type { Metadata } from 'next';
 import { Inter, Instrument_Serif, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
+import '@/lib/env';
 import { cn } from '@/lib/utils';
+import { ThemeProvider } from '@/components/theme-provider';
+import { Toaster } from '@/components/toaster';
+import { ErrorBoundary } from '@/components/error-boundary';
 
 const sans = Inter({
   subsets: ['latin'],
@@ -39,7 +43,12 @@ export default function RootLayout({
       className={cn('h-full antialiased', sans.variable, serif.variable, mono.variable)}
       suppressHydrationWarning
     >
-      <body suppressHydrationWarning className="min-h-full font-sans">{children}</body>
+      <body suppressHydrationWarning className="min-h-full font-sans">
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+          <ErrorBoundary>{children}</ErrorBoundary>
+          <Toaster />
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
