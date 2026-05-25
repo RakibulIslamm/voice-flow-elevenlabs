@@ -278,6 +278,9 @@ function Widget({
     try {
       const conversation = await Conversation.startSession({
         signedUrl,
+        // See note in src/components/voice/voice-ui.tsx — suppresses the
+        // Wake Lock permission prompt on Chrome.
+        useWakeLock: false,
         onConnect: () => setState('listening'),
         onDisconnect: (_d: DisconnectionDetails) => {
           fireEndCallBeacon();

@@ -226,6 +226,11 @@ export function VoiceUI({ agent }: { agent: TalkAgent }) {
     try {
       const conversation = await Conversation.startSession({
         signedUrl,
+        // Opt out of the SDK's screen Wake Lock. On some Chrome builds
+        // it surfaces as the vague "Access other apps and services on
+        // this device" permission prompt — confusing for callers, and
+        // we don't need it for a short browser conversation.
+        useWakeLock: false,
         onConnect: () => {
           setState('listening');
         },
