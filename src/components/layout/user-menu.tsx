@@ -29,18 +29,15 @@ export function UserMenu({ user }: { user: UserMenuUser }) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="group inline-flex items-center gap-2 rounded-full border border-transparent px-1.5 py-1 transition hover:border-border hover:bg-muted"
+          className="group inline-flex items-center gap-1.5 rounded-full pr-2 transition hover:bg-foreground/5"
           aria-label="Open account menu"
         >
-          <Avatar className="size-8">
+          <Avatar className="size-7 ring-1 ring-border/40">
             {user.image ? <AvatarImage src={user.image} alt={displayName} /> : null}
-            <AvatarFallback className="text-xs font-medium">{initials}</AvatarFallback>
+            <AvatarFallback className="text-[10px] font-medium">{initials}</AvatarFallback>
           </Avatar>
-          <span className="hidden max-w-[140px] truncate text-sm font-medium text-foreground sm:inline-block">
-            {displayName}
-          </span>
           <ChevronDown
-            className="hidden size-3.5 text-muted-foreground transition group-data-[state=open]:rotate-180 sm:block"
+            className="size-3 text-muted-foreground transition group-data-[state=open]:rotate-180"
             aria-hidden
           />
         </button>

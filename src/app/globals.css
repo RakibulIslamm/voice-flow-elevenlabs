@@ -7,6 +7,10 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-voice: var(--voice);
+  --color-voice-foreground: var(--voice-foreground);
+  --color-voice-soft: var(--voice-soft);
+  --color-surface: var(--surface);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
   --font-serif: var(--font-serif);
@@ -82,6 +86,12 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* VoiceFlow brand — warm amber accent on a faintly cream surface. */
+  --surface: oklch(0.985 0.008 80);
+  --voice: oklch(0.74 0.155 65);
+  --voice-foreground: oklch(0.18 0.02 70);
+  --voice-soft: oklch(0.965 0.025 80);
 }
 
 .dark {
@@ -116,6 +126,12 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  /* Dark-mode amber stays vivid; surface picks up a warm undertone. */
+  --surface: oklch(0.14 0.012 70);
+  --voice: oklch(0.78 0.16 70);
+  --voice-foreground: oklch(0.14 0.012 70);
+  --voice-soft: oklch(0.24 0.045 70 / 60%);
 }
 
 @layer base {

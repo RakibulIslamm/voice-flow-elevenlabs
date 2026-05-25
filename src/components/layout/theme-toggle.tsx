@@ -2,7 +2,6 @@
 
 import { useTheme } from 'next-themes';
 import { Sun, Moon, Monitor, type LucideIcon } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,14 +26,13 @@ export function ThemeToggle() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
+        <button
+          type="button"
           aria-label="Toggle theme"
-          className="text-muted-foreground hover:text-foreground"
+          className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-foreground/5 hover:text-foreground"
         >
           {isDark ? <Moon className="size-4" /> : <Sun className="size-4" />}
-        </Button>
+        </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">
         {OPTIONS.map(({ value, label, icon: Icon }) => (

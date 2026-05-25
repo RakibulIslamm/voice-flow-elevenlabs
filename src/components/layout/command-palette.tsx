@@ -2,8 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Plus, Search } from 'lucide-react';
 import {
   CommandDialog,
   CommandEmpty,
@@ -33,18 +32,18 @@ export function CommandPaletteTrigger() {
 
   return (
     <>
-      <Button
-        variant="outline"
-        size="sm"
+      <button
+        type="button"
         onClick={() => setOpen(true)}
-        className="h-9 gap-2 text-muted-foreground"
         aria-label="Open command palette"
+        className="inline-flex h-8 items-center gap-2 rounded-full px-2.5 text-xs font-medium text-muted-foreground transition hover:bg-foreground/5 hover:text-foreground"
       >
-        <span className="hidden sm:inline">Search…</span>
-        <kbd className="hidden items-center gap-0.5 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline-flex">
+        <Search className="size-3.5" aria-hidden />
+        <span className="hidden sm:inline">Search</span>
+        <kbd className="hidden items-center gap-0.5 rounded-md border border-border/60 bg-muted/60 px-1 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline-flex">
           <span>⌘</span>K
         </kbd>
-      </Button>
+      </button>
       <CommandPalette open={open} onOpenChange={setOpen} />
     </>
   );

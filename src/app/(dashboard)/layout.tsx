@@ -1,23 +1,30 @@
 import type { ReactNode } from 'react';
 import { requireUserOrRedirect } from '@/lib/auth/guards';
-import { Sidebar } from '@/components/layout/sidebar';
-import { Topbar } from '@/components/layout/topbar';
+import { FloatingBrand } from '@/components/layout/floating-brand';
+import { FloatingDock } from '@/components/layout/floating-dock';
+import { FloatingUtility } from '@/components/layout/floating-utility';
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const session = await requireUserOrRedirect();
   const isAdmin = !!session.user.isAdmin;
 
   return (
-    <div className="flex min-h-svh bg-background">
-      <Sidebar variant="dashboard" isAdmin={isAdmin} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar variant="dashboard" user={session.user} isAdmin={isAdmin} />
-        <main className="flex-1">
-          <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-10">
-            {children}
-          </div>
-        </main>
-      </div>
+    <div className="relative min-h-svh bg-surface text-foreground">
+      {/* Soft amber radial accent — anchors the warm identity without being loud. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-120"
+        style={{
+          backgroundImage:
+            'radial-gradient(60% 60% at 50% 0%, color-mix(in oklch, var(--voice) 14%, transparent), transparent 70%)',
+        }}
+      />
+      <FloatingBrand variant="dashboard" isAdmin={isAdmin} />
+      <FloatingDock variant="dashboard" />
+      <FloatingUtility variant="dashboard" user={session.user} />
+      <main className="px-4 pb-20 pt-28 sm:px-6 md:pt-32 lg:px-10">
+        <div className="mx-auto w-full max-w-5xl">{children}</div>
+      </main>
     </div>
   );
 }

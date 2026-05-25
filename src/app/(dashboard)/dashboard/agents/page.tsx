@@ -8,11 +8,12 @@ export const metadata = { title: 'Agents · VoiceFlow' };
 
 export default function AgentsPage() {
   return (
-    <div className="space-y-8">
+    <div className="space-y-12">
       <PageHeader
         eyebrow="Agents"
-        title="Your AI Receptionists"
+        title="Your AI receptionists"
         description="Configure voice agents that answer your website chat and phone calls."
+        align="start"
         actions={
           <Button asChild size="sm">
             <Link href="/dashboard/agents/new">
