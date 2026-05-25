@@ -53,6 +53,48 @@ pnpm dev
 
 Visit [http://localhost:3000](http://localhost:3000).
 
+## ElevenLabs is BYOK
+
+**VoiceFlow does not hold a master ElevenLabs API key.** Every developer
+running this locally (and every customer in production) brings their own
+ElevenLabs account. After you sign up, head to **Integrations** in the
+dashboard and paste your ElevenLabs API key — it's encrypted with
+AES-256-GCM at rest and decrypted per-request through
+[`getElevenLabsClient(userId)`](src/lib/elevenlabs/client.ts).
+
+The platform owner also needs their own ElevenLabs account if they want
+to host the demo agent on the landing page in production — that demo
+agent is created in the platform owner's ElevenLabs account just like
+any customer's agent.
+
+### One platform-wide ElevenLabs secret
+
+The only ElevenLabs value in `.env.local` is `ELEVENLABS_WEBHOOK_SECRET`
+— a platform-wide HMAC secret used to verify incoming post-call
+webhooks. Every user configures this **same value** in their ElevenLabs
+account's webhook settings during onboarding, so all webhooks regardless
+of source user can be verified with one secret.
+
+Generate it once with:
+
+```bash
+openssl rand -hex 32
+```
+
+### Sanity-check the integration
+
+After connecting your ElevenLabs key from the Integrations dashboard,
+hit:
+
+```
+GET /api/internal/elevenlabs-test
+```
+
+Any signed-in user can call this — it only reads its caller's own
+integration. Returns `{ ok: true, voiceCount, tier, charactersUsed, … }`
+if your BYOK flow works end-to-end, or a clean
+`INTEGRATION_DISCONNECTED` error if the key isn't connected yet.
+
 ### Scripts
 
 | Command              | What it does                              |

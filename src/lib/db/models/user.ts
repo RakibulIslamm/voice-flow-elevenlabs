@@ -16,6 +16,31 @@ export type TwilioIntegration = {
   verifiedAt?: Date;
 };
 
+/**
+ * BYOK ElevenLabs integration. The user supplies their own API key via
+ * the Integrations dashboard. We store it AES-256-GCM-encrypted and only
+ * decrypt at the call site (see `src/lib/elevenlabs/client.ts`).
+ *
+ * `apiKeyPreview` (e.g. "sk_…abcd") is shown in the UI so users can tell
+ * keys apart without us ever rendering the secret itself.
+ *
+ * Tier/usage fields are an opportunistic cache refreshed when the user
+ * clicks "Refresh status" in the Integrations card — they're never the
+ * source of truth for billing logic.
+ */
+export type ElevenLabsIntegration = {
+  enabled: boolean;
+  encryptedApiKey?: string;
+  apiKeyPreview?: string;
+  connectedAt?: Date;
+  verifiedAt?: Date;
+  tier?: string;
+  characterLimit?: number;
+  charactersUsed?: number;
+  canUseInstantVoiceCloning?: boolean;
+  lastSyncedAt?: Date;
+};
+
 export type UserDoc = {
   _id: Types.ObjectId;
   email: string;
@@ -28,6 +53,7 @@ export type UserDoc = {
   stripeSubscriptionId?: string;
   usage: UserUsage;
   integrations: {
+    elevenlabs: ElevenLabsIntegration;
     twilio: TwilioIntegration;
   };
   createdAt: Date;
@@ -54,6 +80,22 @@ const twilioIntegrationSchema = new Schema<TwilioIntegration>(
   { _id: false },
 );
 
+const elevenLabsIntegrationSchema = new Schema<ElevenLabsIntegration>(
+  {
+    enabled: { type: Boolean, default: false },
+    encryptedApiKey: { type: String },
+    apiKeyPreview: { type: String },
+    connectedAt: { type: Date },
+    verifiedAt: { type: Date },
+    tier: { type: String },
+    characterLimit: { type: Number },
+    charactersUsed: { type: Number },
+    canUseInstantVoiceCloning: { type: Boolean },
+    lastSyncedAt: { type: Date },
+  },
+  { _id: false },
+);
+
 const userSchema = new Schema<UserDoc>(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
@@ -70,6 +112,10 @@ const userSchema = new Schema<UserDoc>(
     stripeSubscriptionId: { type: String },
     usage: { type: usageSchema, default: () => ({ minutesUsedThisPeriod: 0 }) },
     integrations: {
+      elevenlabs: {
+        type: elevenLabsIntegrationSchema,
+        default: () => ({ enabled: false }),
+      },
       twilio: { type: twilioIntegrationSchema, default: () => ({ enabled: false }) },
     },
   },

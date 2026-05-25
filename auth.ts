@@ -51,6 +51,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               plan: 'free',
               isAdmin: false,
               'usage.minutesUsedThisPeriod': 0,
+              'integrations.elevenlabs.enabled': false,
               'integrations.twilio.enabled': false,
             },
           },
