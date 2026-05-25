@@ -1,24 +1,32 @@
 import 'server-only';
-import { env } from '@/lib/env';
 import { verifyHmac } from '@/lib/hmac';
 
 /**
  * Verifies an HMAC-SHA256 signature attached by ElevenLabs to a post-call
- * webhook. The platform-wide `ELEVENLABS_WEBHOOK_SECRET` is configured by
- * every user in their ElevenLabs account during onboarding — so a single
- * secret verifies webhooks regardless of which user the agent belongs to.
+ * webhook against a specific user's stored webhook secret.
  *
- * Returns a boolean (callers decide the response — typically a 401).
+ * VoiceFlow is BYOK end-to-end. Each user generates a webhook secret in
+ * their own ElevenLabs workspace (ElevenLabs creates it server-side; the
+ * user can't choose the value) and then pastes that value into VoiceFlow's
+ * Integrations page. We store the secret AES-256-GCM-encrypted on the
+ * user document and decrypt it inside the webhook handler at request time.
+ *
+ * The webhook handler is responsible for:
+ *   1. Reading the raw body.
+ *   2. Extracting the agent_id from the payload.
+ *   3. Looking up the agent → owning user → decrypting the user's secret.
+ *   4. Passing that secret to this function alongside the signature header.
+ *
+ * Returns a boolean — callers decide the response (typically 401 on false).
  *
  * The `signature` header value MAY be wrapped (e.g. "sha256=...", "t=...,v1=...");
- * we strip common prefixes before timing-safe compare. If your ElevenLabs
- * webhook payload format adds a new wrapper, extend `extractSignature()`.
+ * we strip common prefixes before timing-safe compare.
  */
 export function verifyElevenLabsSignature(
   rawBody: string,
   signature: string | null | undefined,
+  secret: string | null | undefined,
 ): boolean {
-  const secret = env.ELEVENLABS_WEBHOOK_SECRET;
   if (!secret) return false;
   if (!signature) return false;
 

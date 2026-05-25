@@ -67,19 +67,30 @@ to host the demo agent on the landing page in production — that demo
 agent is created in the platform owner's ElevenLabs account just like
 any customer's agent.
 
-### One platform-wide ElevenLabs secret
+### Two values per user, zero env vars
 
-The only ElevenLabs value in `.env.local` is `ELEVENLABS_WEBHOOK_SECRET`
-— a platform-wide HMAC secret used to verify incoming post-call
-webhooks. Every user configures this **same value** in their ElevenLabs
-account's webhook settings during onboarding, so all webhooks regardless
-of source user can be verified with one secret.
+There are **no ElevenLabs values in `.env.local`** — the integration is
+fully per-user. Each user supplies two pieces from their ElevenLabs
+dashboard:
 
-Generate it once with:
+1. **API key** — copied from
+   [Profile → API Keys](https://elevenlabs.io/app/settings/api-keys),
+   pasted into VoiceFlow's Integrations page. Encrypted with AES-256-GCM
+   at rest.
+2. **Post-call webhook secret** — when the user creates a post-call
+   webhook in
+   [Conversational AI → Settings](https://elevenlabs.io/app/agents/settings)
+   (or Developers → Webhooks, depending on plan), ElevenLabs generates a
+   secret server-side and shows it once. The user copies it into
+   VoiceFlow. We use it to verify the HMAC signature on every incoming
+   webhook so calls from outside their workspace can't be spoofed.
 
-```bash
-openssl rand -hex 32
-```
+Both values are stored encrypted on the user document and decrypted only
+at the call site —
+[`getElevenLabsClient(userId)`](src/lib/elevenlabs/client.ts) for outbound
+calls,
+[`verifyElevenLabsSignature(body, sig, secret)`](src/lib/elevenlabs/verify-signature.ts)
+for incoming webhooks.
 
 ### Sanity-check the integration
 

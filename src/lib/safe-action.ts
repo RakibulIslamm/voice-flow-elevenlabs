@@ -35,7 +35,7 @@ export function safeAction<Input, Output>(
         };
       }
       await logError(e, { source: 'safeAction', stage: 'parse' }, { severity: 'medium' });
-      return { ok: false, error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' } };
+      return { ok: false, error: { code: 'INTERNAL_ERROR', message: genericMessage(e) } };
     }
 
     try {
@@ -49,7 +49,20 @@ export function safeAction<Input, Output>(
         return { ok: false, error: { code: e.code, message: e.publicMessage } };
       }
       await logError(e, { source: 'safeAction', stage: 'handler' });
-      return { ok: false, error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' } };
+      return { ok: false, error: { code: 'INTERNAL_ERROR', message: genericMessage(e) } };
     }
   };
+}
+
+/**
+ * Generic "something went wrong" message. In development we append the
+ * underlying Error's message so engineers see *why* in the toast instead
+ * of having to hunt the server log. In production we stay sparse — the
+ * raw error never leaks to end users.
+ */
+function genericMessage(e: unknown): string {
+  if (process.env.NODE_ENV === 'development' && e instanceof Error && e.message) {
+    return `Something went wrong: ${e.message}`;
+  }
+  return 'Something went wrong.';
 }

@@ -18,15 +18,13 @@ const serverSchema = z.object({
   AUTH_GOOGLE_SECRET: z.string().min(1, 'AUTH_GOOGLE_SECRET is required'),
   AUTH_RESEND_KEY: z.string().min(1, 'AUTH_RESEND_KEY is required'),
   RESEND_FROM_EMAIL: z.email('RESEND_FROM_EMAIL must be a valid email'),
-  // VoiceFlow is BYOK ElevenLabs — the platform holds NO master API key.
-  // Each user supplies their own key via the Integrations page (encrypted
-  // at rest, decrypted per request through getElevenLabsClient(userId)).
-  // The webhook secret IS platform-wide: every user configures the same
-  // value in their ElevenLabs account during onboarding, so all incoming
-  // post-call webhooks can be verified with one HMAC secret.
-  ELEVENLABS_WEBHOOK_SECRET: z
-    .string()
-    .min(16, 'ELEVENLABS_WEBHOOK_SECRET must be at least 16 characters'),
+  // VoiceFlow is BYOK ElevenLabs end-to-end. The platform holds NO master
+  // ElevenLabs values:
+  //   • API key — user supplies via the Integrations page (encrypted).
+  //   • Webhook secret — ElevenLabs generates one per user when they create
+  //     the post-call webhook in their dashboard. User copies it into
+  //     VoiceFlow's Integrations page (encrypted). Verified per-user inside
+  //     the webhook handler via `verifyElevenLabsSignature(body, sig, secret)`.
   OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required'),
   OPENROUTER_BASE_URL: z.url('OPENROUTER_BASE_URL must be a valid URL'),
   STRIPE_SECRET_KEY: z.string().min(1, 'STRIPE_SECRET_KEY is required'),

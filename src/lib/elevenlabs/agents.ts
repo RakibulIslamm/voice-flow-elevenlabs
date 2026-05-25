@@ -145,15 +145,15 @@ export async function getSignedConversationUrl(
 
 /**
  * Translates VoiceFlow's canonical AgentConfig into the SDK's request body.
- * Centralises the shape mapping so when ElevenLabs renames a field we only
- * patch one place.
  *
- * The SDK currently expects:
- *   { conversation_config: { agent: { first_message, language, prompt: {...} },
- *                            tts: { voice_id }, ... },
- *     name }
- * Earlier versions split this across `agent_config` + `conversation_config`.
- * We keep this isolated and untyped (cast at call site) for resilience.
+ * Important: the SDK accepts the body in **camelCase** property names and
+ * serialises to snake_case on the wire itself. If we send snake_case keys
+ * the SDK doesn't recognise them at all — it'll throw
+ * `Missing required key "conversationConfig"` because what we labelled
+ * `conversation_config` is invisible to the validator.
+ *
+ * `conversationConfig` is required on create, so we always include it
+ * (even if empty) rather than gating it on field presence.
  */
 function buildSdkRequest(
   config: Partial<AgentConfig>,
@@ -162,7 +162,7 @@ function buildSdkRequest(
   const conversationConfig: Record<string, unknown> = {};
   const agentInner: Record<string, unknown> = {};
 
-  if (config.firstMessage !== undefined) agentInner.first_message = config.firstMessage;
+  if (config.firstMessage !== undefined) agentInner.firstMessage = config.firstMessage;
   if (config.language !== undefined) agentInner.language = config.language;
   else if (ctx.mode === 'create') agentInner.language = 'en';
 
@@ -180,28 +180,37 @@ function buildSdkRequest(
   if (Object.keys(agentInner).length > 0) conversationConfig.agent = agentInner;
 
   if (config.voiceId !== undefined) {
-    conversationConfig.tts = { voice_id: config.voiceId };
+    conversationConfig.tts = { voiceId: config.voiceId };
   }
 
-  const body: Record<string, unknown> = {};
+  const body: Record<string, unknown> = {
+    // Required on create; harmless on update.
+    conversationConfig,
+  };
   if (config.name !== undefined) body.name = config.name;
-  if (Object.keys(conversationConfig).length > 0) {
-    body.conversation_config = conversationConfig;
-  }
   return body;
 }
 
+/**
+ * ElevenLabs tool envelope. For POST webhooks the parameter JSON Schema
+ * MUST live at `apiSchema.requestBodySchema` — putting it on a top-level
+ * `parameters` field makes ElevenLabs reject the agent with
+ * "POST method requires request_body_schema".
+ *
+ * For GET tools the equivalent slot is `queryParamsSchema`. We only emit
+ * POST tools today.
+ */
 function toSdkTool(tool: VoiceFlowTool): Record<string, unknown> {
   return {
     type: 'webhook',
     name: tool.name,
     description: tool.description,
-    api_schema: {
+    apiSchema: {
       url: tool.webhook.url,
       method: tool.webhook.method,
-      request_headers: tool.webhook.headers,
+      requestHeaders: tool.webhook.headers,
+      requestBodySchema: tool.parameters,
     },
-    parameters: tool.parameters,
   };
 }
 

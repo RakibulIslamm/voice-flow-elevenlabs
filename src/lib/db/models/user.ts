@@ -28,17 +28,31 @@ export type TwilioIntegration = {
  * clicks "Refresh status" in the Integrations card — they're never the
  * source of truth for billing logic.
  */
+export type ElevenLabsAccountInfo = {
+  tier: string;
+  characterLimit: number;
+  charactersUsed: number;
+};
+
 export type ElevenLabsIntegration = {
   enabled: boolean;
   encryptedApiKey?: string;
   apiKeyPreview?: string;
   connectedAt?: Date;
   verifiedAt?: Date;
-  tier?: string;
-  characterLimit?: number;
-  charactersUsed?: number;
-  canUseInstantVoiceCloning?: boolean;
-  lastSyncedAt?: Date;
+  /** Snapshot of the ElevenLabs subscription, refreshed on connect / verify. */
+  accountInfo?: ElevenLabsAccountInfo;
+
+  /**
+   * Per-user post-call webhook secret. ElevenLabs generates this when the
+   * user creates the webhook in their dashboard — we never choose it.
+   * Encrypted at rest, decrypted only inside the webhook handler at
+   * request time to verify the HMAC signature. Optional: an account can
+   * be "connected" (API key set) before the webhook is configured.
+   */
+  encryptedWebhookSecret?: string;
+  webhookSecretPreview?: string;
+  webhookConfiguredAt?: Date;
 };
 
 export type UserDoc = {
@@ -80,6 +94,15 @@ const twilioIntegrationSchema = new Schema<TwilioIntegration>(
   { _id: false },
 );
 
+const elevenLabsAccountInfoSchema = new Schema<ElevenLabsAccountInfo>(
+  {
+    tier: { type: String, required: true },
+    characterLimit: { type: Number, required: true },
+    charactersUsed: { type: Number, required: true },
+  },
+  { _id: false },
+);
+
 const elevenLabsIntegrationSchema = new Schema<ElevenLabsIntegration>(
   {
     enabled: { type: Boolean, default: false },
@@ -87,11 +110,10 @@ const elevenLabsIntegrationSchema = new Schema<ElevenLabsIntegration>(
     apiKeyPreview: { type: String },
     connectedAt: { type: Date },
     verifiedAt: { type: Date },
-    tier: { type: String },
-    characterLimit: { type: Number },
-    charactersUsed: { type: Number },
-    canUseInstantVoiceCloning: { type: Boolean },
-    lastSyncedAt: { type: Date },
+    accountInfo: { type: elevenLabsAccountInfoSchema },
+    encryptedWebhookSecret: { type: String },
+    webhookSecretPreview: { type: String },
+    webhookConfiguredAt: { type: Date },
   },
   { _id: false },
 );

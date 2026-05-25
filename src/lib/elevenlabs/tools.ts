@@ -72,15 +72,16 @@ const TEMPLATE_TOOL_NAMES: Record<TemplateKey, readonly VoiceFlowToolName[]> = {
 };
 
 function toolUrl(name: VoiceFlowToolName): string {
-  const base = (env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+  const base = (env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
   return `${base}/api/elevenlabs/tools/${name}`;
 }
 
 function defaultHeaders(): Record<string, string> {
   return {
     'content-type': 'application/json',
-    // The webhook handler validates this against ELEVENLABS_WEBHOOK_SECRET.
-    // ElevenLabs forwards request headers verbatim from this map.
+    // ElevenLabs forwards request headers verbatim from this map. Tool
+    // webhooks are authorised at the handler by looking up the agent →
+    // owning user — there's no shared secret in the header.
     'x-voiceflow-source': 'elevenlabs-tool',
   };
 }
