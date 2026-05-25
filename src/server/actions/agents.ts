@@ -19,9 +19,11 @@ import {
   deleteAgent as deleteElevenLabsAgent,
   updateAgent as updateElevenLabsAgent,
   getAgent as getElevenLabsAgent,
+  createTool as createElevenLabsTool,
+  deleteTool as deleteElevenLabsTool,
   type AgentConfig,
 } from '@/lib/elevenlabs/agents';
-import { getToolsForTemplate, type TemplateKey } from '@/lib/elevenlabs/tools';
+import { getToolsForTemplate, type TemplateKey, type VoiceFlowTool } from '@/lib/elevenlabs/tools';
 import { getTemplate, type BusinessInfo } from '@/lib/elevenlabs/templates';
 import { trackEvent } from '@/lib/tracking/event';
 import { logError } from '@/lib/tracking/log-error';
@@ -131,19 +133,32 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
   const tools = getToolsForTemplate(input.template as TemplateKey);
   const agentNameInElevenLabs = `${user.email}: ${input.agentName}`;
 
-  // 4. Provision in the user's ElevenLabs account. If this throws, no DB
-  //    write has happened — clean failure mode.
-  const { agentId: elevenLabsAgentId } = await createElevenLabsAgent(userId, {
-    name: agentNameInElevenLabs,
-    voiceId: input.voiceId,
-    firstMessage: input.greeting,
-    systemPrompt: input.systemPrompt,
-    llm: 'gemini-2.5-flash',
-    tools,
-  });
+  // 4. Provision tool resources in the user's workspace first; the agent
+  //    needs the resulting tool IDs to wire them in via `prompt.toolIds`.
+  //    If any tool create fails, roll back the ones we did create so we
+  //    don't leave orphans in their dashboard.
+  const toolIds = await provisionTools(userId, tools, 'create');
 
-  // 5. Persist locally. If this fails AFTER ElevenLabs succeeded, we have
-  //    an orphan in their dashboard — best-effort rollback below.
+  // 5. Provision the agent itself. If this throws AFTER tool creates,
+  //    clean up the tools too.
+  let elevenLabsAgentId: string;
+  try {
+    const res = await createElevenLabsAgent(userId, {
+      name: agentNameInElevenLabs,
+      voiceId: input.voiceId,
+      firstMessage: input.greeting,
+      systemPrompt: input.systemPrompt,
+      llm: 'gemini-2.5-flash',
+      toolIds,
+    });
+    elevenLabsAgentId = res.agentId;
+  } catch (e) {
+    await cleanupTools(userId, toolIds);
+    throw e;
+  }
+
+  // 6. Persist locally. If this fails AFTER ElevenLabs succeeded, we
+  //    have orphans on their side — best-effort rollback below.
   try {
     const doc = await Agent.create({
       userId,
@@ -153,6 +168,7 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
       businessHours: input.businessHours,
       faq: input.faq,
       elevenLabsAgentId,
+      elevenLabsToolIds: toolIds,
       voiceId: input.voiceId,
       greeting: input.greeting,
       systemPrompt: input.systemPrompt,
@@ -188,7 +204,7 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
       { severity: 'high' },
     );
 
-    // Best-effort cleanup. `deleteAgent` already returns { ok } without throwing.
+    // Best-effort cleanup: delete agent + tools so we don't leave orphans.
     const cleanup = await deleteElevenLabsAgent(userId, elevenLabsAgentId);
     if (!cleanup.ok) {
       void logError(
@@ -197,6 +213,7 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
         { severity: 'high' },
       );
     }
+    await cleanupTools(userId, toolIds);
 
     throw new ExternalServiceError(
       'VoiceFlow',
@@ -204,6 +221,28 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
     );
   }
 });
+
+async function provisionTools(
+  userId: string,
+  tools: VoiceFlowTool[],
+  _stage: 'create' | 'resync',
+): Promise<string[]> {
+  const created: string[] = [];
+  try {
+    for (const tool of tools) {
+      const { toolId } = await createElevenLabsTool(userId, tool);
+      created.push(toolId);
+    }
+    return created;
+  } catch (e) {
+    await cleanupTools(userId, created);
+    throw e;
+  }
+}
+
+async function cleanupTools(userId: string, toolIds: string[]): Promise<void> {
+  await Promise.all(toolIds.map((id) => deleteElevenLabsTool(userId, id)));
+}
 
 /**
  * Helper to expose template-derived defaults to the wizard without
@@ -418,6 +457,9 @@ export const deleteAgent = safeAction(deleteAgentInputSchema, async (input) => {
         );
       }
     }
+
+    // Clean up the standalone tool documents the agent depended on.
+    await cleanupTools(userId, agent.elevenLabsToolIds ?? []);
   } else {
     void trackEvent('agent.delete.skip_elevenlabs', {
       userId,
@@ -593,11 +635,22 @@ async function runReactivate(userId: string, agent: OwnedAgent) {
 const resyncToolsInputSchema = z.object({ agentId: objectIdSchema });
 
 /**
- * Pushes the current tool config (with the latest webhook URLs and
- * `{{system__agent_id}}` / `{{system__conversation_id}}` template
- * variables) to ElevenLabs for an existing agent. Use this when the
- * tool URL format changes — e.g. when we add query params so the
- * webhook handler can identify the calling agent.
+ * Re-creates the agent's webhook tool documents in the user's ElevenLabs
+ * workspace and rewires the agent to use them. Needed because ElevenLabs
+ * moved tools to first-class resources — old agents may reference tool
+ * IDs that were deleted (or were never compatible with the current
+ * schema), causing `document_not_found` errors.
+ *
+ * Flow:
+ *   1. Create fresh tool docs with the current URL/header config.
+ *   2. Update the agent to reference the new tool IDs (this also clears
+ *      whatever stale IDs were cached on the ElevenLabs side).
+ *   3. Save the new IDs to our DB.
+ *   4. Best-effort delete the previous tool IDs we knew about, so we
+ *      don't leave orphans in the user's workspace.
+ *
+ * If any step before (3) fails, we clean up the freshly-created tools so
+ * we don't leak resources.
  */
 export const resyncAgentTools = safeAction(resyncToolsInputSchema, async (input) => {
   const session = await requireUser();
@@ -608,15 +661,46 @@ export const resyncAgentTools = safeAction(resyncToolsInputSchema, async (input)
   await requireElevenLabsConnection(userId);
 
   const tools = getToolsForTemplate(agent.template as TemplateKey);
+  const previousToolIds = [...(agent.elevenLabsToolIds ?? [])];
+
+  // Step 1: create fresh tool documents.
+  let newToolIds: string[];
   try {
-    await updateElevenLabsAgent(userId, agent.elevenLabsAgentId, { tools });
+    newToolIds = await provisionTools(userId, tools, 'resync');
   } catch (e) {
-    void logError(e, { scope: 'resyncAgentTools', agentId: agent._id.toString() });
+    void logError(e, {
+      scope: 'resyncAgentTools',
+      stage: 'create-tools',
+      agentId: agent._id.toString(),
+    });
+    throw new ExternalServiceError(
+      'ElevenLabs',
+      'Failed to create new tool resources. Please try again.',
+    );
+  }
+
+  // Step 2: point the agent at the new tools.
+  try {
+    await updateElevenLabsAgent(userId, agent.elevenLabsAgentId, { toolIds: newToolIds });
+  } catch (e) {
+    void logError(e, {
+      scope: 'resyncAgentTools',
+      stage: 'update-agent',
+      agentId: agent._id.toString(),
+    });
+    await cleanupTools(userId, newToolIds);
     throw new ExternalServiceError(
       'ElevenLabs',
       'Failed to re-sync tool configuration. Please try again.',
     );
   }
+
+  // Step 3: persist the new IDs so we know what to clean up next time.
+  agent.elevenLabsToolIds = newToolIds;
+  await agent.save();
+
+  // Step 4: best-effort delete the previous tools (orphaned now).
+  await cleanupTools(userId, previousToolIds);
 
   void trackEvent('agent.tools_resynced', {
     userId,

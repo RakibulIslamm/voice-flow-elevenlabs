@@ -32,7 +32,7 @@ export function getOpenRouter() {
  * latency on short transcript summaries. Bump to Opus only if customers
  * complain about quality on very long calls.
  */
-export const SUMMARY_MODEL_ID = 'anthropic/claude-sonnet-4.6';
+export const SUMMARY_MODEL_ID = 'deepseek/deepseek-v4-flash';
 
 /**
  * USD per million tokens for SUMMARY_MODEL_ID. Used to estimate per-call

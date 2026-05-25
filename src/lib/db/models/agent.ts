@@ -31,6 +31,13 @@ export type AgentDoc = {
   faq: AgentFaqEntry[];
   elevenLabsAgentId: string;
   elevenLabsPhoneAgentId?: string;
+  /**
+   * IDs of the standalone ElevenLabs tool documents this agent depends on.
+   * ElevenLabs moved away from inline `prompt.tools` in favour of separate
+   * tool resources referenced by `prompt.toolIds`. We track them here so
+   * we can re-sync (delete + recreate) and clean up on agent deletion.
+   */
+  elevenLabsToolIds: string[];
   voiceId: string;
   greeting?: string;
   systemPrompt?: string;
@@ -84,6 +91,7 @@ const agentSchema = new Schema<AgentDoc>(
     faq: { type: [faqEntrySchema], default: [] },
     elevenLabsAgentId: { type: String, required: true, unique: true },
     elevenLabsPhoneAgentId: { type: String, sparse: true, unique: true },
+    elevenLabsToolIds: { type: [String], default: [] },
     voiceId: { type: String, required: true },
     greeting: { type: String },
     systemPrompt: { type: String },

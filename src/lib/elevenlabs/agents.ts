@@ -27,8 +27,14 @@ export type AgentConfig = {
   firstMessage: string;
   systemPrompt: string;
   llm: ElevenLabsLLM;
-  /** Webhook tools the agent can call mid-conversation. */
-  tools?: VoiceFlowTool[];
+  /**
+   * IDs of standalone ElevenLabs tool documents to attach to this agent.
+   * Tools are first-class resources in the user's workspace — create them
+   * via `createTools()` first, then pass the returned ids here. The legacy
+   * inline `tools` array is deprecated; ElevenLabs only honours `toolIds`
+   * now.
+   */
+  toolIds?: string[];
   /** ISO 639-1 ASR/TTS language code. Defaults to 'en'. */
   language?: string;
   /** 0-1; lower = more deterministic. Defaults to the SDK's default. */
@@ -198,13 +204,16 @@ function buildSdkRequest(
   if (config.language !== undefined) agentInner.language = config.language;
   else if (ctx.mode === 'create') agentInner.language = 'en';
 
-  if (config.systemPrompt !== undefined || config.llm !== undefined || config.tools) {
+  if (config.systemPrompt !== undefined || config.llm !== undefined || config.toolIds) {
     const prompt: Record<string, unknown> = {};
     if (config.systemPrompt !== undefined) prompt.prompt = config.systemPrompt;
     if (config.llm !== undefined) prompt.llm = config.llm;
     if (config.temperature !== undefined) prompt.temperature = config.temperature;
-    if (config.tools && config.tools.length > 0) {
-      prompt.tools = config.tools.map(toSdkTool);
+    if (config.toolIds) {
+      // Always send the array (even empty) so an update can clear stale
+      // toolIds — omitting the field would leave the previous list intact
+      // and we'd hit the "Documents with ids {...} not found" error again.
+      prompt.toolIds = config.toolIds;
     }
     agentInner.prompt = prompt;
   }
@@ -224,26 +233,81 @@ function buildSdkRequest(
 }
 
 /**
- * ElevenLabs tool envelope. For POST webhooks the parameter JSON Schema
- * MUST live at `apiSchema.requestBodySchema` — putting it on a top-level
- * `parameters` field makes ElevenLabs reject the agent with
- * "POST method requires request_body_schema".
+ * Creates a single standalone webhook tool in the user's ElevenLabs
+ * workspace and returns its `tool_xxx` id. ElevenLabs requires every
+ * field they declare in the JSON Schema to mirror in `request_body_schema`
+ * (so the LLM knows what to fill in); we pass our `VoiceFlowTool`
+ * parameters verbatim because they were already authored to that shape.
  *
- * For GET tools the equivalent slot is `queryParamsSchema`. We only emit
- * POST tools today.
+ * Dynamic header values for built-in system variables (agent_id,
+ * conversation_id) use the `{ variableName: 'system__...' }` envelope —
+ * ElevenLabs substitutes them at call time before signing.
  */
-function toSdkTool(tool: VoiceFlowTool): Record<string, unknown> {
-  return {
-    type: 'webhook',
-    name: tool.name,
-    description: tool.description,
-    apiSchema: {
-      url: tool.webhook.url,
-      method: tool.webhook.method,
-      requestHeaders: tool.webhook.headers,
-      requestBodySchema: tool.parameters,
-    },
-  };
+export async function createTool(
+  userId: string,
+  tool: VoiceFlowTool,
+): Promise<{ toolId: string }> {
+  const client = await getElevenLabsClient(userId);
+  try {
+    const headers: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(tool.webhook.headers)) {
+      const match = typeof v === 'string' ? v.match(/^\{\{(system__[\w]+)\}\}$/) : null;
+      headers[k] = match ? { variableName: match[1] } : v;
+    }
+
+    const body = {
+      toolConfig: {
+        type: 'webhook',
+        name: tool.name,
+        description: tool.description,
+        apiSchema: {
+          url: tool.webhook.url,
+          method: tool.webhook.method,
+          requestHeaders: headers,
+          requestBodySchema: tool.parameters,
+        },
+      },
+    };
+
+    const res = await client.conversationalAi.tools.create(
+      body as unknown as Parameters<typeof client.conversationalAi.tools.create>[0],
+    );
+    const toolId = pickToolId(res);
+    if (!toolId) {
+      throw new ExternalServiceError(
+        'ElevenLabs',
+        `Tool ${tool.name} created but no tool_id was returned.`,
+      );
+    }
+    return { toolId };
+  } catch (e) {
+    throw toExternalError(e, `create tool ${tool.name}`);
+  }
+}
+
+/**
+ * Best-effort delete of a workspace tool. Used during agent deletion
+ * and re-sync; any failure is swallowed because an orphaned tool in
+ * the user's workspace is annoying but not catastrophic.
+ */
+export async function deleteTool(userId: string, toolId: string): Promise<{ ok: boolean }> {
+  try {
+    const client = await getElevenLabsClient(userId);
+    await client.conversationalAi.tools.delete(toolId, { force: true });
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function pickToolId(res: unknown): string | null {
+  if (res && typeof res === 'object') {
+    const r = res as Record<string, unknown>;
+    if (typeof r.id === 'string') return r.id;
+    if (typeof r.tool_id === 'string') return r.tool_id;
+    if (typeof r.toolId === 'string') return r.toolId;
+  }
+  return null;
 }
 
 function pickAgentId(res: unknown): string | null {
