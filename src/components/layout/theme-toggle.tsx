@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useTheme } from 'next-themes';
 import { Sun, Moon, Monitor, type LucideIcon } from 'lucide-react';
 import {
@@ -18,10 +19,15 @@ const OPTIONS: { value: 'light' | 'dark' | 'system'; label: string; icon: Lucide
 export function ThemeToggle() {
   const { theme, setTheme, resolvedTheme } = useTheme();
 
-  // resolvedTheme reflects what's actually applied — falls back to 'light'
-  // before hydration so we don't flicker the icon.
+  // `useTheme()` returns `resolvedTheme: undefined` during SSR + the first
+  // client render, so we'd hydrate a Sun icon and then immediately swap to
+  // a Moon if the user's theme is dark. Gate the icon swap on `mounted` so
+  // the server HTML and the first client render are byte-identical.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const active = (theme ?? 'system') as 'light' | 'dark' | 'system';
-  const isDark = resolvedTheme === 'dark';
+  const showMoon = mounted && resolvedTheme === 'dark';
 
   return (
     <DropdownMenu>
@@ -31,7 +37,7 @@ export function ThemeToggle() {
           aria-label="Toggle theme"
           className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-foreground/5 hover:text-foreground"
         >
-          {isDark ? <Moon className="size-4" /> : <Sun className="size-4" />}
+          {showMoon ? <Moon className="size-4" /> : <Sun className="size-4" />}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">

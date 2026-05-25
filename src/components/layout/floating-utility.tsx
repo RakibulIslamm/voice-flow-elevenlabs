@@ -1,6 +1,5 @@
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from './theme-toggle';
-import { CommandPaletteTrigger } from './command-palette';
 import { UserMenu } from './user-menu';
 
 type UserMenuUser = {
@@ -14,8 +13,9 @@ type Variant = 'dashboard' | 'admin';
 
 /**
  * Top-right floating utility cluster. Mirrors the brand mark on the left
- * and the nav dock in the centre. Holds the command palette (dashboard
- * only), theme toggle and user menu.
+ * and the nav dock in the centre. Currently holds the theme toggle and
+ * user menu. A command palette / search will return here in a later phase
+ * once there is real content (agents, calls, captures) worth searching.
  */
 export function FloatingUtility({
   variant = 'dashboard',
@@ -32,11 +32,6 @@ export function FloatingUtility({
           variant === 'admin' ? 'border-amber-500/30' : 'border-border/70',
         )}
       >
-        {variant === 'dashboard' ? (
-          <div className="hidden md:block">
-            <CommandPaletteTrigger />
-          </div>
-        ) : null}
         <ThemeToggle />
         <UserMenu user={user} />
       </div>

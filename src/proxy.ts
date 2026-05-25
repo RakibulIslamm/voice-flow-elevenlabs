@@ -44,10 +44,18 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIX.some((prefix) => pathname.startsWith(prefix));
 }
 
+// Authenticated users hitting these should be sent straight to the dashboard.
+const AUTH_PAGES = new Set<string>(['/sign-in', '/sign-up']);
+
 export default auth((req) => {
   const { nextUrl } = req;
   const session = req.auth;
   const pathname = nextUrl.pathname;
+
+  // Logged-in users don't belong on the auth screens — bounce them to the app.
+  if (session && AUTH_PAGES.has(pathname)) {
+    return NextResponse.redirect(new URL('/dashboard', nextUrl.origin));
+  }
 
   if (isPublic(pathname)) return NextResponse.next();
 

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter, Instrument_Serif, JetBrains_Mono } from 'next/font/google';
+import { Inter, Fraunces, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import '@/lib/env';
 import { cn } from '@/lib/utils';
@@ -14,9 +14,13 @@ const sans = Inter({
   display: 'swap',
 });
 
-const serif = Instrument_Serif({
+// Fraunces — variable display serif with optical sizing. When `axes` is
+// set the font is delivered as a variable font, so we must NOT pass a
+// fixed `weight` (Next.js's font loader will throw otherwise). All weights
+// across the variable range are available via `font-weight` utilities.
+const serif = Fraunces({
   subsets: ['latin'],
-  weight: '400',
+  axes: ['opsz', 'SOFT'],
   variable: '--font-serif',
   display: 'swap',
 });
