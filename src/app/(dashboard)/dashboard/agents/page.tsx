@@ -3,10 +3,12 @@ import { Bot, Plug2, Plus } from 'lucide-react';
 import { requireUserOrRedirect } from '@/lib/auth/guards';
 import { connectDb } from '@/lib/db/connect';
 import { User, type ElevenLabsIntegration } from '@/lib/db/models/user';
-import { Agent } from '@/lib/db/models/agent';
+import { Agent, type AgentDoc } from '@/lib/db/models/agent';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { EmptyState } from '@/components/states/empty-state';
+import { AgentsGrid, type AgentListItem } from '@/components/agents/agents-grid';
+import { env } from '@/lib/env';
 
 export const metadata = { title: 'Agents · VoiceFlow' };
 export const dynamic = 'force-dynamic';
@@ -17,18 +19,35 @@ export default async function AgentsPage() {
 
   await connectDb();
 
-  const [user, agentCount] = await Promise.all([
+  const [user, agents] = await Promise.all([
     User.findById(userId)
       .select('integrations.elevenlabs.enabled')
       .lean<{ integrations: { elevenlabs: ElevenLabsIntegration } } | null>(),
-    Agent.countDocuments({ userId }),
+    Agent.find({ userId })
+      .sort({ updatedAt: -1 })
+      .select(
+        '_id name businessName template status channels.browser.publicSlug channels.browser.enabled channels.phone.enabled updatedAt',
+      )
+      .lean<Pick<AgentDoc, '_id' | 'name' | 'businessName' | 'template' | 'status' | 'channels' | 'updatedAt'>[]>(),
   ]);
 
   const connected = !!user?.integrations?.elevenlabs?.enabled;
-  const hasAgents = agentCount > 0;
+  const items: AgentListItem[] = (agents ?? []).map((a) => ({
+    id: a._id.toString(),
+    name: a.name,
+    businessName: a.businessName ?? '',
+    template: a.template,
+    status: a.status,
+    publicSlug: a.channels?.browser?.publicSlug ?? '',
+    browserEnabled: a.channels?.browser?.enabled ?? true,
+    phoneEnabled: a.channels?.phone?.enabled ?? false,
+    updatedAt: a.updatedAt?.toISOString() ?? new Date().toISOString(),
+  }));
+
+  const appUrl = (env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-10">
       <PageHeader
         eyebrow="Agents"
         title="Your AI receptionists"
@@ -46,10 +65,8 @@ export default async function AgentsPage() {
         }
       />
 
-      {hasAgents ? (
-        <p className="text-sm text-muted-foreground">
-          {agentCount} agent{agentCount === 1 ? '' : 's'} — full list lands in Phase 8.
-        </p>
+      {items.length > 0 ? (
+        <AgentsGrid agents={items} elConnected={connected} appUrl={appUrl} />
       ) : connected ? (
         <EmptyState
           icon={Bot}

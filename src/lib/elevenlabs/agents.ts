@@ -115,6 +115,38 @@ export async function deleteAgent(
 }
 
 /**
+ * Fetches an agent from the user's ElevenLabs account.
+ *
+ * Returns `{ exists: false }` when ElevenLabs answers with 404 — the
+ * caller uses this to detect "the user deleted the agent from their
+ * ElevenLabs dashboard out from under us" and surface a re-activation
+ * blocker. Any other error bubbles as ExternalServiceError.
+ */
+export async function getAgent(
+  userId: string,
+  agentId: string,
+): Promise<{ exists: boolean }> {
+  const client = await getElevenLabsClient(userId);
+  try {
+    await client.conversationalAi.agents.get(agentId);
+    return { exists: true };
+  } catch (e) {
+    if (isNotFoundError(e)) return { exists: false };
+    throw toExternalError(e, 'fetch agent');
+  }
+}
+
+function isNotFoundError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const err = e as { statusCode?: unknown; status?: unknown; message?: unknown };
+  if (err.statusCode === 404 || err.status === 404) return true;
+  if (typeof err.message === 'string' && /\b404\b|not[\s_-]?found/i.test(err.message)) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Returns a short-lived signed WebSocket URL for a private agent so the
  * browser SDK can connect without us ever exposing the user's API key.
  * URLs expire — call this on every page load, don't cache server-side.

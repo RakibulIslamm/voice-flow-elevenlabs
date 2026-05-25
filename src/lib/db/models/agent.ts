@@ -1,7 +1,7 @@
 import { Schema, model, models, type Model, type Types } from 'mongoose';
 
 export type AgentTemplate = 'dental' | 'restaurant' | 'lead-qualifier' | 'custom';
-export type AgentStatus = 'active' | 'paused';
+export type AgentStatus = 'active' | 'paused' | 'error';
 export type AgentTonePreset = 'professional' | 'friendly' | 'casual';
 
 export type AgentFaqEntry = {
@@ -94,7 +94,7 @@ const agentSchema = new Schema<AgentDoc>(
     },
     status: {
       type: String,
-      enum: ['active', 'paused'] as const,
+      enum: ['active', 'paused', 'error'] as const,
       default: 'active',
     },
     channels: {

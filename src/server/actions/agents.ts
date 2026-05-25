@@ -5,13 +5,21 @@ import { Types } from 'mongoose';
 import { safeAction } from '@/lib/safe-action';
 import { requireUser } from '@/lib/auth/guards';
 import { connectDb } from '@/lib/db/connect';
-import { Agent } from '@/lib/db/models/agent';
+import { Agent, type AgentStatus } from '@/lib/db/models/agent';
 import { User, type UserDoc } from '@/lib/db/models/user';
-import { QuotaExceededError, ExternalServiceError } from '@/lib/errors';
+import {
+  QuotaExceededError,
+  ExternalServiceError,
+  NotFoundError,
+  AppError,
+} from '@/lib/errors';
 import { requireElevenLabsConnection } from '@/lib/elevenlabs/require';
 import {
   createAgent as createElevenLabsAgent,
   deleteAgent as deleteElevenLabsAgent,
+  updateAgent as updateElevenLabsAgent,
+  getAgent as getElevenLabsAgent,
+  type AgentConfig,
 } from '@/lib/elevenlabs/agents';
 import { getToolsForTemplate, type TemplateKey } from '@/lib/elevenlabs/tools';
 import { getTemplate, type BusinessInfo } from '@/lib/elevenlabs/templates';
@@ -265,4 +273,331 @@ async function ensureUniqueSlug(requested: string): Promise<string> {
 function randomSuffix(len: number): string {
   const id = new Types.ObjectId().toString();
   return id.slice(-len);
+}
+
+function makeSlug(input: string): string {
+  const base = input
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50);
+  return base || 'agent';
+}
+
+// ---------------------------------------------------------------------------
+// Edit / update flows
+// ---------------------------------------------------------------------------
+
+const objectIdSchema = z
+  .string()
+  .regex(/^[a-f0-9]{24}$/i, 'Invalid agent ID.');
+
+const updateAgentInputSchema = z.object({
+  agentId: objectIdSchema,
+  // Basic info
+  name: z.string().trim().min(1).max(40).optional(),
+  businessName: z.string().trim().min(1).max(80).optional(),
+  businessHours: businessHoursSchema,
+  faq: z.array(faqEntrySchema).max(100).optional(),
+  // Voice / personality
+  greeting: z.string().trim().min(1).max(200).optional(),
+  systemPrompt: z.string().trim().min(1).max(12_000).optional(),
+  tonePreset: z.enum(TONES).optional(),
+});
+
+export const updateAgent = safeAction(updateAgentInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+
+  // We sync any voice-facing field changes to ElevenLabs first. If their
+  // API rejects the patch, we leave Mongo untouched — the local doc stays
+  // consistent with what's actually live in their account.
+  await requireElevenLabsConnection(userId);
+
+  const elPatch: Partial<AgentConfig> = {};
+  if (input.name !== undefined) {
+    const owner = await User.findById(userId)
+      .select('email')
+      .lean<{ email: string } | null>();
+    elPatch.name = owner ? `${owner.email}: ${input.name}` : input.name;
+  }
+  if (input.greeting !== undefined) elPatch.firstMessage = input.greeting;
+  if (input.systemPrompt !== undefined) elPatch.systemPrompt = input.systemPrompt;
+
+  if (Object.keys(elPatch).length > 0) {
+    await updateElevenLabsAgent(userId, agent.elevenLabsAgentId, elPatch);
+  }
+
+  if (input.name !== undefined) agent.name = input.name;
+  if (input.businessName !== undefined) agent.businessName = input.businessName;
+  if (input.businessHours !== undefined) agent.businessHours = input.businessHours;
+  if (input.faq !== undefined) agent.faq = input.faq;
+  if (input.greeting !== undefined) agent.greeting = input.greeting;
+  if (input.systemPrompt !== undefined) agent.systemPrompt = input.systemPrompt;
+  if (input.tonePreset !== undefined) agent.tonePreset = input.tonePreset;
+
+  await agent.save();
+
+  const touched = Object.keys(input).filter((k) => k !== 'agentId');
+  void trackEvent('agent.updated', {
+    userId,
+    agentId: agent._id.toString(),
+    properties: { fields: touched },
+  });
+
+  return { ok: true };
+});
+
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
+const deleteAgentInputSchema = z.object({
+  agentId: objectIdSchema,
+  // Defence-in-depth: the AlertDialog forces the user to type the agent
+  // name. We re-check it server-side so a CSRF-ish "click delete" can't
+  // succeed without the user knowing the name.
+  confirmName: z.string().trim().min(1),
+});
+
+export const deleteAgent = safeAction(deleteAgentInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+
+  if (input.confirmName !== agent.name) {
+    throw new AppError({
+      code: 'CONFIRMATION_MISMATCH',
+      statusCode: 400,
+      publicMessage: 'The name you typed does not match this agent.',
+    });
+  }
+
+  // Best-effort cleanup on the user's ElevenLabs account. We skip the call
+  // entirely when they're disconnected — orphaned agents in their EL
+  // dashboard aren't billed when idle and they can clean up later.
+  const user = await User.findById(userId)
+    .select('integrations.elevenlabs.enabled integrations.twilio.enabled')
+    .lean<{ integrations?: { elevenlabs?: { enabled?: boolean }; twilio?: { enabled?: boolean } } } | null>();
+  const elConnected = !!user?.integrations?.elevenlabs?.enabled;
+
+  if (elConnected) {
+    const cleanup = await deleteElevenLabsAgent(userId, agent.elevenLabsAgentId);
+    if (!cleanup.ok) {
+      void logError(
+        new Error('ElevenLabs delete failed during agent delete'),
+        {
+          scope: 'deleteAgent',
+          agentId: agent._id.toString(),
+          elevenLabsAgentId: agent.elevenLabsAgentId,
+          reason: cleanup.reason,
+        },
+        { severity: 'medium' },
+      );
+    }
+
+    if (agent.elevenLabsPhoneAgentId) {
+      const phoneCleanup = await deleteElevenLabsAgent(userId, agent.elevenLabsPhoneAgentId);
+      if (!phoneCleanup.ok) {
+        void logError(
+          new Error('ElevenLabs phone-agent delete failed'),
+          {
+            scope: 'deleteAgent',
+            agentId: agent._id.toString(),
+            elevenLabsPhoneAgentId: agent.elevenLabsPhoneAgentId,
+            reason: phoneCleanup.reason,
+          },
+          { severity: 'medium' },
+        );
+      }
+    }
+  } else {
+    void trackEvent('agent.delete.skip_elevenlabs', {
+      userId,
+      agentId: agent._id.toString(),
+      properties: { reason: 'integration_disconnected' },
+    });
+  }
+
+  // Twilio webhook cleanup lands in Phase 12 — placeholder hook for now.
+  // if (agent.channels.phone.enabled) { … }
+
+  await agent.deleteOne();
+
+  void trackEvent('agent.deleted', {
+    userId,
+    agentId: agent._id.toString(),
+    properties: { hadPhone: !!agent.elevenLabsPhoneAgentId, elConnected },
+  });
+
+  return { ok: true };
+});
+
+// ---------------------------------------------------------------------------
+// Slug regeneration
+// ---------------------------------------------------------------------------
+
+const regenerateSlugInputSchema = z.object({ agentId: objectIdSchema });
+
+export const regenerateAgentSlug = safeAction(regenerateSlugInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+
+  const base = makeSlug(agent.name || agent.businessName || 'agent');
+  const slug = await ensureUniqueSlug(base);
+  agent.channels.browser.publicSlug = slug;
+  await agent.save();
+
+  void trackEvent('agent.slug_regenerated', {
+    userId,
+    agentId: agent._id.toString(),
+    properties: { slug },
+  });
+
+  return { publicSlug: slug };
+});
+
+// ---------------------------------------------------------------------------
+// Allowed domains
+// ---------------------------------------------------------------------------
+
+// Hostname pattern — labels of a-z 0-9 and hyphens (not leading/trailing),
+// dot-separated. We strip protocol and trailing slash before validating so
+// the user can paste either `example.com` or `https://example.com/`.
+const HOSTNAME_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
+const LOCALHOST_RE = /^localhost(?::\d+)?$/i;
+
+const allowedDomainsInputSchema = z.object({
+  agentId: objectIdSchema,
+  domains: z
+    .array(
+      z
+        .string()
+        .trim()
+        .transform((v) => v.replace(/^https?:\/\//i, '').replace(/\/.*$/, ''))
+        .refine((v) => HOSTNAME_RE.test(v) || LOCALHOST_RE.test(v), {
+          message: 'Each domain must be a valid hostname (no protocol, no path).',
+        }),
+    )
+    .max(20),
+});
+
+export const updateAllowedDomains = safeAction(allowedDomainsInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+
+  // Dedupe (case-insensitive). We store the lowercased form so widget
+  // origin checks at request time can compare without re-normalising.
+  const seen = new Set<string>();
+  const normalised: string[] = [];
+  for (const d of input.domains) {
+    const lower = d.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    normalised.push(lower);
+  }
+
+  agent.channels.browser.allowedDomains = normalised;
+  await agent.save();
+
+  void trackEvent('agent.allowed_domains_updated', {
+    userId,
+    agentId: agent._id.toString(),
+    properties: { count: normalised.length },
+  });
+
+  return { allowedDomains: normalised };
+});
+
+// ---------------------------------------------------------------------------
+// Status toggle + re-activation
+// ---------------------------------------------------------------------------
+
+const setStatusInputSchema = z.object({
+  agentId: objectIdSchema,
+  status: z.enum(['active', 'paused']),
+});
+
+export const setAgentStatus = safeAction(setStatusInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+
+  // Pausing is always allowed — the agent just stops accepting new calls
+  // at the widget edge. Activation routes through the verification path
+  // so we don't silently re-enable a missing/broken EL agent.
+  if (input.status === 'active') {
+    return runReactivate(userId, agent);
+  }
+
+  agent.status = 'paused';
+  await agent.save();
+
+  void trackEvent('agent.paused', { userId, agentId: agent._id.toString() });
+  return { status: 'paused' as AgentStatus };
+});
+
+const reactivateInputSchema = z.object({ agentId: objectIdSchema });
+
+export const reactivateAgent = safeAction(reactivateInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+  return runReactivate(userId, agent);
+});
+
+type OwnedAgent = Awaited<ReturnType<typeof loadOwnedAgent>>;
+
+async function runReactivate(userId: string, agent: OwnedAgent) {
+  await requireElevenLabsConnection(userId);
+
+  const { exists } = await getElevenLabsAgent(userId, agent.elevenLabsAgentId);
+  if (!exists) {
+    // Sticky failure state — the local Agent doc is now out of sync with
+    // their ElevenLabs account in a way the user can't recover from
+    // without deleting the VoiceFlow record.
+    agent.status = 'error';
+    await agent.save();
+    throw new AppError({
+      code: 'AGENT_GONE',
+      statusCode: 410,
+      publicMessage:
+        'This agent no longer exists in your ElevenLabs account. Please delete it from VoiceFlow and create a new one.',
+    });
+  }
+
+  agent.status = 'active';
+  await agent.save();
+
+  void trackEvent('agent.reactivated', { userId, agentId: agent._id.toString() });
+  return { status: 'active' as AgentStatus };
+}
+
+// ---------------------------------------------------------------------------
+// Internal: shared owner-lookup
+// ---------------------------------------------------------------------------
+
+async function loadOwnedAgent(agentId: string, userId: string) {
+  const agent = await Agent.findById(agentId);
+  if (!agent || agent.userId.toString() !== userId) {
+    throw new NotFoundError('Agent not found.');
+  }
+  return agent;
 }
