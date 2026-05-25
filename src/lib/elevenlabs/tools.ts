@@ -73,22 +73,18 @@ const TEMPLATE_TOOL_NAMES: Record<TemplateKey, readonly VoiceFlowToolName[]> = {
 
 function toolUrl(name: VoiceFlowToolName): string {
   const base = (env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
-  // ElevenLabs substitutes `{{system__agent_id}}` and `{{system__conversation_id}}`
-  // at call time. Tool webhooks DON'T carry an HMAC signature (only post-call
-  // and personalization webhooks do), so we rely on the agent_id lookup to
-  // authorise the dispatch. Passing the ids via query params guarantees they
-  // arrive regardless of which body shape ElevenLabs sends.
-  return (
-    `${base}/api/elevenlabs/tools/${name}` +
-    `?agent_id={{system__agent_id}}&conversation_id={{system__conversation_id}}`
-  );
+  return `${base}/api/elevenlabs/tools/${name}`;
 }
 
 function defaultHeaders(): Record<string, string> {
   return {
     'content-type': 'application/json',
-    // ElevenLabs forwards request headers verbatim from this map. We mirror
-    // the ids into headers too so the handler can read them either way.
+    // ElevenLabs forwards request headers verbatim and substitutes
+    // `{{system__*}}` template variables at call time. URL placeholders
+    // are rejected by their validator unless declared in path_params_schema,
+    // so headers are the safest channel for identifying the calling agent.
+    // Tool webhooks DON'T carry an HMAC signature (only post-call/personalization
+    // do), so we rely on this agent_id to authorise the dispatch.
     'x-voiceflow-source': 'elevenlabs-tool',
     'x-elevenlabs-agent-id': '{{system__agent_id}}',
     'x-elevenlabs-conversation-id': '{{system__conversation_id}}',
