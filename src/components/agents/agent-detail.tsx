@@ -635,7 +635,8 @@ function EmbedTab({
         title="Script embed"
         description="Drop this in your site's <head> or before </body>. The widget renders an overlay button on every page."
         snippet={scriptEmbed}
-        previewHref={publicUrl}
+        previewHref={`/embed-test/${slug}`}
+        previewLabel="Test embed in new tab"
         language="html"
       />
 
@@ -657,6 +658,7 @@ function EmbedCard({
   description,
   snippet,
   previewHref,
+  previewLabel = 'Preview',
   language,
 }: {
   icon: typeof Globe2;
@@ -664,6 +666,7 @@ function EmbedCard({
   description: string;
   snippet: string;
   previewHref: string;
+  previewLabel?: string;
   language: 'html' | 'url';
 }) {
   return (
@@ -687,7 +690,7 @@ function EmbedCard({
           <Button asChild variant="ghost" size="sm" className="h-7 px-2">
             <Link href={previewHref} target="_blank" rel="noopener noreferrer">
               <ExternalLink className="size-3.5" />
-              Preview
+              {previewLabel}
             </Link>
           </Button>
           <CopyButton value={snippet} />

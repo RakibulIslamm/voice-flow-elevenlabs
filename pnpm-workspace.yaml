@@ -1,5 +1,9 @@
+packages:
+  - 'widget'
+
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
 onlyBuiltDependencies:
   - msw
+  - esbuild

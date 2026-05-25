@@ -32,8 +32,10 @@ const PUBLIC_EXACT = new Set<string>([
 const PUBLIC_PREFIX = [
   '/legal/',
   '/talk/',
+  '/embed-test/',
   '/api/auth/',
   '/api/widget/',
+  '/api/voice/',
   '/api/elevenlabs/',
   '/api/twilio/',
   '/api/internal/log-error', // browser telemetry sink — must work without auth

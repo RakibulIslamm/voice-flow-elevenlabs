@@ -3,6 +3,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  Conversation,
+  type DisconnectionDetails,
+  type Mode,
+} from '@elevenlabs/client';
+
+// The SDK's MessagePayload type isn't re-exported from the package root,
+// so we inline the subset we actually read in onMessage. `role` is the
+// canonical post-0.x field; `source` is kept for older SDK builds that
+// haven't migrated callers yet.
+type SdkMessagePayload = {
+  message: string;
+  role?: 'user' | 'agent';
+  source?: 'user' | 'ai';
+};
+import {
   AlertTriangle,
   ChevronRight,
   Loader2,
@@ -16,6 +31,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { reportClientError } from '@/lib/tracking/client-report';
 import type { TalkAgent } from './talk-shell';
 
 // ---------------------------------------------------------------------------
@@ -36,31 +52,9 @@ export type VoiceState =
 type TranscriptRole = 'user' | 'assistant';
 type TranscriptEntry = { role: TranscriptRole; text: string; ts: number };
 
+type ConversationInstance = Awaited<ReturnType<typeof Conversation.startSession>>;
+
 const ACTIVE_STATES = new Set<VoiceState>(['listening', 'thinking', 'speaking']);
-
-// Phase-9 fakery — populated for visual testing. Removed when Phase 10
-// wires the live ElevenLabs SDK into this component.
-const DEMO_TRANSCRIPT: TranscriptEntry[] = [
-  { role: 'assistant', text: "Hi! How can I help you today?", ts: Date.now() - 22_000 },
-  { role: 'user', text: 'Do you have any appointments this Friday?', ts: Date.now() - 14_000 },
-  {
-    role: 'assistant',
-    text: "Let me check. We have openings at 10:30 AM and 2:15 PM on Friday — would either of those work?",
-    ts: Date.now() - 7_000,
-  },
-];
-
-const CYCLE_ORDER: VoiceState[] = [
-  'idle',
-  'permission-prompt',
-  'permission-denied',
-  'connecting',
-  'listening',
-  'thinking',
-  'speaking',
-  'ended',
-  'error',
-];
 
 // ---------------------------------------------------------------------------
 // VoiceUI
@@ -70,93 +64,256 @@ export function VoiceUI({ agent }: { agent: TalkAgent }) {
   const [state, setState] = useState<VoiceState>('idle');
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  // The ListeningWaveform pulls byte-frequency data from the SDK's input
+  // analyser via this function. `null` while not in an active call.
+  const [getLevels, setGetLevels] = useState<(() => Uint8Array) | null>(null);
+
+  // Mutable session refs — kept off React state so they never trigger
+  // re-renders and we can read fresh values inside the SDK callbacks
+  // even after the closing render has scheduled a state update.
+  const conversationRef = useRef<ConversationInstance | null>(null);
+  const widgetTokenRef = useRef<string | null>(null);
+  const callIdRef = useRef<string | null>(null);
+
   const transcriptRef = useRef<HTMLDivElement | null>(null);
 
-  const stopStream = useCallback(() => {
-    setStream((s) => {
-      s?.getTracks().forEach((t) => t.stop());
-      return null;
-    });
-  }, []);
-
-  // Hard-stop the mic if the component unmounts mid-call (route change,
-  // refresh, etc.) — leaving a track running shows a permanent "this site
-  // is using your microphone" indicator and tanks the user's trust.
+  // Hard-stop any active conversation on unmount (route change, refresh).
+  // Leaving the SDK running keeps the mic indicator on and the ElevenLabs
+  // session alive — both burn caller trust and the owner's quota.
   useEffect(() => {
     return () => {
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      stream?.getTracks().forEach((t) => t.stop());
+      conversationRef.current?.endSession().catch(() => {});
+      conversationRef.current = null;
     };
-    // We deliberately omit `stream` from deps — this effect models *unmount*,
-    // not every stream swap (which already cleans up via stopStream).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-scroll the transcript when a new entry lands.
+  // Auto-scroll the transcript whenever a new entry lands.
   useEffect(() => {
     const el = transcriptRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [transcript.length, state]);
 
-  // Phase-9 visual demo: when we enter `speaking`, seed a few transcript
-  // lines so the UI has something to render. Phase 10 deletes this and
-  // pushes real lines from the ElevenLabs SDK callbacks.
-  useEffect(() => {
-    if (state === 'speaking' && transcript.length === 0) {
-      setTranscript(DEMO_TRANSCRIPT);
-    }
-    if (state === 'idle' || state === 'ended') {
-      // Keep transcript visible after a call ends; clear only on a fresh start.
-    }
-  }, [state, transcript.length]);
+  const persistTranscriptTurn = useCallback(
+    (role: TranscriptRole, content: string) => {
+      const tok = widgetTokenRef.current;
+      const cid = callIdRef.current;
+      if (!tok || !cid) return;
+      void fetch('/api/widget/transcript', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ widgetToken: tok, callId: cid, role, content }),
+        keepalive: true,
+      }).catch(() => {});
+    },
+    [],
+  );
+
+  const fireEndCallBeacon = useCallback(() => {
+    const tok = widgetTokenRef.current;
+    const cid = callIdRef.current;
+    if (!tok || !cid) return;
+    void fetch('/api/widget/end-call', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ widgetToken: tok, callId: cid }),
+      keepalive: true,
+    }).catch(() => {});
+  }, []);
+
+  const teardown = useCallback(() => {
+    conversationRef.current?.endSession().catch(() => {});
+    conversationRef.current = null;
+    widgetTokenRef.current = null;
+    callIdRef.current = null;
+    setGetLevels(() => null);
+  }, []);
 
   const startCall = useCallback(async () => {
     setErrorMessage(null);
+    setTranscript([]);
     setState('permission-prompt');
+
+    // Step 1: prompt the OS mic dialog up-front so a denial fails cleanly
+    // before we round-trip to the server. The SDK reopens its own stream
+    // — we release this probe immediately.
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Hold the stream so ListeningWaveform can wire an AnalyserNode and
-      // drive the bars from real audio levels. Phase 10's SDK will take
-      // over the stream lifecycle — we'll hand the granted stream in
-      // rather than letting the SDK request a new one.
-      setStream(s);
-      setState('connecting');
-      // Brief Phase-9 handshake delay so the connect→listen handoff doesn't
-      // feel instantaneous. Phase 10 transitions from the SDK's on-open.
-      window.setTimeout(() => setState('listening'), 700);
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+      probe.getTracks().forEach((t) => t.stop());
     } catch (e) {
       const denied =
-        e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+        e instanceof DOMException &&
+        (e.name === 'NotAllowedError' || e.name === 'SecurityError');
       if (denied) {
         setState('permission-denied');
       } else {
         setErrorMessage(e instanceof Error ? e.message : 'Could not access your microphone.');
         setState('error');
       }
+      return;
     }
-  }, []);
 
-  const endCall = useCallback(() => {
-    stopStream();
-    setState('idle');
-  }, [stopStream]);
+    setState('connecting');
+
+    // Step 2: bootstrap session — HMAC widget token gated on the agent
+    // owner's domain allowlist and per-IP rate limit.
+    let widgetToken: string;
+    try {
+      const res = await fetch('/api/widget/init', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentSlug: agent.slug }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { widgetToken?: string; error?: { code?: string; message?: string } }
+        | null;
+      if (!res.ok || !body?.widgetToken) {
+        setErrorMessage(messageForInitFailure(res.status, body?.error?.message));
+        setState('error');
+        void reportClientError({
+          message: `widget/init ${res.status}: ${body?.error?.code ?? 'unknown'}`,
+          name: 'VoiceInitError',
+          context: { status: res.status, code: body?.error?.code },
+        });
+        return;
+      }
+      widgetToken = body.widgetToken;
+      widgetTokenRef.current = widgetToken;
+    } catch {
+      setErrorMessage('Could not reach the server. Check your connection and try again.');
+      setState('error');
+      return;
+    }
+
+    // Step 3: exchange the token for a signed ElevenLabs WS URL + a
+    // Call doc id we'll write transcript turns into.
+    let signedUrl: string;
+    let callId: string;
+    try {
+      const res = await fetch('/api/voice/signed-url', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ widgetToken }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | {
+            signedUrl?: string;
+            callId?: string;
+            error?: { code?: string; message?: string };
+          }
+        | null;
+      if (!res.ok || !body?.signedUrl || !body?.callId) {
+        setErrorMessage(messageForSignedUrlFailure(res.status, body?.error?.message));
+        setState('error');
+        void reportClientError({
+          message: `voice/signed-url ${res.status}: ${body?.error?.code ?? 'unknown'}`,
+          name: 'VoiceSignedUrlError',
+          context: { status: res.status, code: body?.error?.code },
+        });
+        return;
+      }
+      signedUrl = body.signedUrl;
+      callId = body.callId;
+      callIdRef.current = callId;
+    } catch {
+      setErrorMessage('Could not reach the server. Check your connection and try again.');
+      setState('error');
+      return;
+    }
+
+    // Step 4: open the real ElevenLabs conversation. From here on the
+    // SDK drives the state machine through its callbacks.
+    try {
+      const conversation = await Conversation.startSession({
+        signedUrl,
+        onConnect: () => {
+          setState('listening');
+        },
+        onDisconnect: (_details: DisconnectionDetails) => {
+          fireEndCallBeacon();
+          conversationRef.current = null;
+          setGetLevels(() => null);
+          setState('ended');
+        },
+        onError: (message: string, context?: unknown) => {
+          setErrorMessage(message || 'The agent encountered an error.');
+          setState('error');
+          void reportClientError({
+            message: `ElevenLabs SDK error: ${message}`,
+            name: 'VoiceSDKError',
+            context: { sdkContext: context ?? null },
+          });
+        },
+        onModeChange: ({ mode }: { mode: Mode }) => {
+          // SDK Mode is from the AGENT's POV: `speaking` = agent talks,
+          // `listening` = agent listens (user can speak).
+          setState(mode === 'speaking' ? 'speaking' : 'listening');
+        },
+        onMessage: ({ role, message }: SdkMessagePayload) => {
+          if (!message) return;
+          const local: TranscriptRole = role === 'user' ? 'user' : 'assistant';
+          setTranscript((prev) => [...prev, { role: local, text: message, ts: Date.now() }]);
+          persistTranscriptTurn(local, message);
+          // Synthetic `thinking`: after the caller finishes a turn the
+          // SDK keeps mode='listening' until the agent's first audio
+          // frame. Show a thinking caption until the mode flip.
+          if (local === 'user') {
+            setState((s) => (s === 'listening' ? 'thinking' : s));
+          }
+        },
+      });
+      conversationRef.current = conversation;
+      // Bind the listening waveform to the SDK's input analyser. The
+      // wrapper-arrow trips React's "is this an updater function?" check
+      // so the function itself lands in state.
+      setGetLevels(() => () => conversation.getInputByteFrequencyData());
+    } catch (e) {
+      setErrorMessage(e instanceof Error ? e.message : 'Could not start the call.');
+      setState('error');
+      void reportClientError({
+        message: `Conversation.startSession threw: ${e instanceof Error ? e.message : 'unknown'}`,
+        name: 'VoiceSDKError',
+      });
+    }
+  }, [agent.slug, fireEndCallBeacon, persistTranscriptTurn]);
+
+  const endCall = useCallback(async () => {
+    const conv = conversationRef.current;
+    if (conv) {
+      // endSession triggers onDisconnect, which sets state='ended' and
+      // fires the end-call beacon. Don't double-fire from here.
+      try {
+        await conv.endSession();
+      } catch {
+        // Already disconnected — fall through to local cleanup.
+        teardown();
+        setState('ended');
+      }
+    } else {
+      teardown();
+      setState('idle');
+    }
+  }, [teardown]);
 
   const restart = useCallback(() => {
-    stopStream();
+    teardown();
     setTranscript([]);
     setErrorMessage(null);
     setState('idle');
-  }, [stopStream]);
+  }, [teardown]);
 
   return (
     <div className="flex flex-1 flex-col gap-5">
       <div className="relative grid place-items-center">
-        <TalkOrb state={state} onClick={startCall} stream={stream} />
+        <TalkOrb state={state} onClick={startCall} getLevels={getLevels} />
       </div>
 
-      <StateCaption state={state} errorMessage={errorMessage} onRetry={startCall} onRestart={restart} />
+      <StateCaption
+        state={state}
+        errorMessage={errorMessage}
+        onRetry={startCall}
+        onRestart={restart}
+      />
 
       <Transcript transcript={transcript} ref={transcriptRef} state={state} agent={agent} />
 
@@ -170,10 +327,26 @@ export function VoiceUI({ agent }: { agent: TalkAgent }) {
           End call
         </Button>
       ) : null}
-
-      <DevCycler state={state} setState={setState} />
     </div>
   );
+}
+
+// Friendly status-code copy. Server already returns publicMessage for AppErrors
+// but we override for the most common cases so the UI reads cleanly even if
+// the server message is missing.
+function messageForInitFailure(status: number, serverMessage?: string): string {
+  if (status === 401) return 'Embed not authorized for this domain.';
+  if (status === 503) return 'This agent is temporarily unavailable.';
+  if (status === 429) return 'Too many requests. Please wait a minute and try again.';
+  if (status === 404) return 'Agent not found.';
+  return serverMessage ?? 'Could not start the call.';
+}
+
+function messageForSignedUrlFailure(status: number, serverMessage?: string): string {
+  if (status === 402) return 'Service limit reached. Please contact the site owner.';
+  if (status === 401) return 'Widget session expired. Please reload the page.';
+  if (status === 503) return 'This agent is temporarily unavailable.';
+  return serverMessage ?? 'Could not start the call.';
 }
 
 // ---------------------------------------------------------------------------
@@ -183,11 +356,11 @@ export function VoiceUI({ agent }: { agent: TalkAgent }) {
 function TalkOrb({
   state,
   onClick,
-  stream,
+  getLevels,
 }: {
   state: VoiceState;
   onClick: () => void;
-  stream: MediaStream | null;
+  getLevels: (() => Uint8Array) | null;
 }) {
   const interactive = state === 'idle';
   const showSpinner = state === 'permission-prompt' || state === 'connecting';
@@ -292,7 +465,7 @@ function TalkOrb({
               exit={{ opacity: 0, scale: 0.9 }}
               transition={{ duration: 0.18 }}
             >
-              <ListeningWaveform stream={stream} />
+              <ListeningWaveform getLevels={getLevels} />
             </motion.div>
           ) : state === 'permission-denied' ? (
             <motion.div
@@ -386,18 +559,14 @@ function TalkOrb({
 }
 
 // ---------------------------------------------------------------------------
-// Listening waveform — the centerpiece of "user is talking"
+// Listening waveform — driven by SDK's input analyser
 // ---------------------------------------------------------------------------
 
-// Peak heights are tuned so the wave sits within the 36px-tall core circle
-// with a comfortable margin. Edges shorter, middle taller — the classic
-// "voice signal" silhouette. When a real MediaStream is provided the bars
-// drive off an AnalyserNode; with no stream (dev cycler), they fall back
-// to a faint idle shimmer so the orb still looks alive.
-const LISTENING_PEAKS = [14, 22, 30, 38, 44, 38, 30, 22, 14] as const;
-const FLOOR_RATIO = 0.18;
+const BASE_PEAKS = [14, 22, 30, 38, 44, 38, 30, 22, 14] as const;
+const LISTENING_PEAKS = BASE_PEAKS.map((v) => v * 1.8);
+const FLOOR_RATIO = 0.1;
 
-function ListeningWaveform({ stream }: { stream: MediaStream | null }) {
+function ListeningWaveform({ getLevels }: { getLevels: (() => Uint8Array) | null }) {
   const barRefs = useRef<(HTMLSpanElement | null)[]>([]);
 
   useEffect(() => {
@@ -406,44 +575,25 @@ function ListeningWaveform({ stream }: { stream: MediaStream | null }) {
 
     let raf = 0;
     let cancelled = false;
-    let audioCtx: AudioContext | null = null;
-    let analyser: AnalyserNode | null = null;
-    // ArrayBuffer-backed (not SharedArrayBuffer) so AnalyserNode.getByteFrequencyData accepts it.
-    let buffer: Uint8Array<ArrayBuffer> | null = null;
-    // Per-bar smoothed level so the bars decay gently when you go silent
+    // Per-bar smoothed level so bars decay gently when you go silent
     // rather than snapping to floor on a single quiet frame.
     const smoothed = new Array<number>(bars.length).fill(0);
-
-    if (stream && stream.getAudioTracks().length > 0) {
-      try {
-        const AC =
-          window.AudioContext ??
-          (window as unknown as { webkitAudioContext?: typeof AudioContext })
-            .webkitAudioContext;
-        if (AC) {
-          audioCtx = new AC();
-          // AudioContext can spawn suspended on some browsers; resume is
-          // a no-op when it's already running. Promise-rejection swallowed
-          // because Safari has historically rejected silently.
-          audioCtx.resume().catch(() => {});
-          const source = audioCtx.createMediaStreamSource(stream);
-          analyser = audioCtx.createAnalyser();
-          analyser.fftSize = 64; // 32 frequency bins — plenty for 9 bars
-          analyser.smoothingTimeConstant = 0.65;
-          source.connect(analyser);
-          buffer = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
-        }
-      } catch {
-        analyser = null;
-      }
-    }
 
     const start = performance.now();
     const tick = (now: number) => {
       if (cancelled) return;
 
-      if (analyser && buffer) {
-        analyser.getByteFrequencyData(buffer);
+      let buffer: Uint8Array | null = null;
+      if (getLevels) {
+        try {
+          const b = getLevels();
+          if (b && b.length > 0) buffer = b;
+        } catch {
+          buffer = null;
+        }
+      }
+
+      if (buffer) {
         // Down-sample buffer to bar count by averaging neighbour bins.
         const binSize = buffer.length / bars.length;
         for (let i = 0; i < bars.length; i++) {
@@ -451,16 +601,15 @@ function ListeningWaveform({ stream }: { stream: MediaStream | null }) {
           const hi = Math.floor((i + 1) * binSize);
           let sum = 0;
           for (let j = lo; j < hi; j++) sum += buffer[j];
-          const raw = sum / Math.max(1, hi - lo) / 255; // 0..1
-          // Exponential smoothing toward the new level — faster rise
-          // (snappy when you speak) than fall (graceful decay).
+          const raw = sum / Math.max(1, hi - lo) / 255;
+          // Faster rise than fall — snappy on speech, graceful on silence.
           const target = Math.min(1, raw * 1.6);
           const speed = target > smoothed[i] ? 0.45 : 0.12;
           smoothed[i] = smoothed[i] + (target - smoothed[i]) * speed;
         }
       } else {
-        // No mic stream — fall back to a low-amplitude idle shimmer so
-        // the dev cycler still has something to look at.
+        // Subtle shimmer while we wait for the SDK to attach (or when
+        // an upstream caller renders this without providing levels).
         const t = (now - start) / 1000;
         for (let i = 0; i < bars.length; i++) {
           const v = (Math.sin(t * 1.6 + i * 0.45) + 1) / 2;
@@ -482,9 +631,8 @@ function ListeningWaveform({ stream }: { stream: MediaStream | null }) {
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
-      audioCtx?.close().catch(() => {});
     };
-  }, [stream]);
+  }, [getLevels]);
 
   return (
     <div className="flex items-center gap-1.25" aria-hidden>
@@ -494,7 +642,7 @@ function ListeningWaveform({ stream }: { stream: MediaStream | null }) {
           ref={(el) => {
             barRefs.current[i] = el;
           }}
-          className="block w-1.5 rounded-full bg-voice-foreground transition-[background-color]"
+          className="block w-1.5 rounded-full bg-voice-foreground"
           style={{ height: `${Math.round(peak * FLOOR_RATIO)}px` }}
         />
       ))}
@@ -715,31 +863,4 @@ function formatTime(ts: number): string {
   } catch {
     return '';
   }
-}
-
-// ---------------------------------------------------------------------------
-// Dev-only state cycler
-// ---------------------------------------------------------------------------
-
-function DevCycler({
-  state,
-  setState,
-}: {
-  state: VoiceState;
-  setState: (s: VoiceState) => void;
-}) {
-  if (process.env.NODE_ENV !== 'development') return null;
-  const idx = CYCLE_ORDER.indexOf(state);
-  const next = CYCLE_ORDER[(idx + 1) % CYCLE_ORDER.length];
-  return (
-    <div className="mx-auto flex flex-col items-center gap-1.5 pt-2">
-      <button
-        type="button"
-        onClick={() => setState(next)}
-        className="rounded-full border border-dashed border-border/70 bg-card/60 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition hover:text-foreground"
-      >
-        Dev: cycle state ({state} → {next})
-      </button>
-    </div>
-  );
 }

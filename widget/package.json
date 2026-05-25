@@ -1,0 +1,20 @@
+{
+  "name": "@voiceflow/widget",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Standalone embeddable widget bundle. Renders a floating Talk button + voice modal inside a Shadow DOM on the customer's site.",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
+  "dependencies": {
+    "@elevenlabs/client": "latest",
+    "preact": "latest"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}

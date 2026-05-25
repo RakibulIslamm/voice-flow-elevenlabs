@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "cross-env MallocNanoZone= next dev",
-    "build": "cross-env MallocNanoZone= next build",
+    "build": "pnpm build:widget && cross-env MallocNanoZone= next build",
+    "build:next": "cross-env MallocNanoZone= next build",
+    "build:widget": "pnpm --filter @voiceflow/widget build",
     "start": "cross-env MallocNanoZone= next start",
     "lint": "cross-env MallocNanoZone= eslint",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json,md}\" \"widget/**/*.{ts,tsx,css,json,md}\"",
@@ -15,6 +17,7 @@
   },
   "dependencies": {
     "@auth/mongodb-adapter": "^3.11.2",
+    "@elevenlabs/client": "^1.8.1",
     "@elevenlabs/elevenlabs-js": "^2.49.1",
     "@hookform/resolvers": "^5.4.0",
     "@hugeicons/core-free-icons": "^4.1.4",
