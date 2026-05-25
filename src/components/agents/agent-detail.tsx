@@ -19,6 +19,7 @@ import {
   Pencil,
   PhoneCall,
   Play,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -54,6 +55,7 @@ import { EmptyState } from '@/components/states/empty-state';
 import {
   deleteAgent,
   reactivateAgent,
+  resyncAgentTools,
   updateAgent,
 } from '@/server/actions/agents';
 import type {
@@ -409,6 +411,8 @@ function OverviewTab({
         <ReactivateCard agentId={agent.id} />
       ) : null}
 
+      {context.elConnected ? <ResyncToolsCard agentId={agent.id} /> : null}
+
       {needsAttention && agent.status === 'paused' ? null : null}
 
       <Card>
@@ -485,6 +489,48 @@ function StatCard({
         {value}
       </p>
       {hint ? <p className="mt-1 text-[10px] text-muted-foreground">{hint}</p> : null}
+    </div>
+  );
+}
+
+function ResyncToolsCard({ agentId }: { agentId: string }) {
+  const [pending, startTransition] = useTransition();
+
+  function onClick() {
+    startTransition(async () => {
+      const result = await resyncAgentTools({ agentId });
+      if (result.ok) {
+        toast.success(`Re-synced ${result.data.toolCount} tools to ElevenLabs.`);
+      } else {
+        toast.error(result.error.message);
+        void reportClientError({
+          message: `resyncAgentTools: ${result.error.code}`,
+          name: 'ResyncAgentToolsError',
+        });
+      }
+    });
+  }
+
+  return (
+    <div className="flex flex-col items-start justify-between gap-3 rounded-2xl border border-border/70 bg-card/40 p-5 sm:flex-row sm:items-center">
+      <div className="flex items-start gap-3">
+        <Workflow className="mt-0.5 size-4 shrink-0 text-voice" />
+        <div>
+          <p className="text-sm font-medium text-foreground">Tool webhooks</p>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Re-push this agent&apos;s tool configuration to ElevenLabs. Use if tool calls fail
+            with &ldquo;trouble checking availability&rdquo; — the URLs may be out of date.
+          </p>
+        </div>
+      </div>
+      <Button onClick={onClick} disabled={pending} variant="outline">
+        {pending ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <RefreshCw className="size-4" />
+        )}
+        Re-sync tools
+      </Button>
     </div>
   );
 }

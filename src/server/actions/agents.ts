@@ -590,6 +590,43 @@ async function runReactivate(userId: string, agent: OwnedAgent) {
   return { status: 'active' as AgentStatus };
 }
 
+const resyncToolsInputSchema = z.object({ agentId: objectIdSchema });
+
+/**
+ * Pushes the current tool config (with the latest webhook URLs and
+ * `{{system__agent_id}}` / `{{system__conversation_id}}` template
+ * variables) to ElevenLabs for an existing agent. Use this when the
+ * tool URL format changes — e.g. when we add query params so the
+ * webhook handler can identify the calling agent.
+ */
+export const resyncAgentTools = safeAction(resyncToolsInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+  await requireElevenLabsConnection(userId);
+
+  const tools = getToolsForTemplate(agent.template as TemplateKey);
+  try {
+    await updateElevenLabsAgent(userId, agent.elevenLabsAgentId, { tools });
+  } catch (e) {
+    void logError(e, { scope: 'resyncAgentTools', agentId: agent._id.toString() });
+    throw new ExternalServiceError(
+      'ElevenLabs',
+      'Failed to re-sync tool configuration. Please try again.',
+    );
+  }
+
+  void trackEvent('agent.tools_resynced', {
+    userId,
+    agentId: agent._id.toString(),
+    properties: { toolCount: tools.length },
+  });
+
+  return { ok: true as const, toolCount: tools.length };
+});
+
 // ---------------------------------------------------------------------------
 // Internal: shared owner-lookup
 // ---------------------------------------------------------------------------

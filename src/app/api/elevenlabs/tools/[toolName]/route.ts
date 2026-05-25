@@ -2,7 +2,7 @@ import 'server-only';
 import { NextResponse, type NextRequest } from 'next/server';
 import { ZodError } from 'zod';
 import { Call } from '@/lib/db/models/call';
-import { verifyAndLoadContext } from '@/lib/elevenlabs/webhook-context';
+import { loadToolContext } from '@/lib/elevenlabs/webhook-context';
 import { TOOL_HANDLERS } from '@/lib/tools/handlers';
 import type { VoiceFlowToolName } from '@/lib/elevenlabs/tools';
 import { logError } from '@/lib/tracking/log-error';
@@ -39,19 +39,19 @@ export async function POST(
     });
   }
 
-  const verified = await verifyAndLoadContext(req);
+  const verified = await loadToolContext(req);
   if (!verified.ok) {
-    // Genuine auth failures (401) — return the real status so ElevenLabs
-    // surfaces the misconfiguration; otherwise we'd silently swallow
-    // a wrong webhook secret and pretend tools work.
-    if (verified.status === 401) {
-      return NextResponse.json(
-        { ok: false, error: { code: verified.code, message: verified.message } },
-        { status: 401 },
-      );
-    }
-    // Other failures (agent missing, etc.) — graceful 200 so ElevenLabs
-    // forwards the apology to the caller instead of looping retries.
+    // No HMAC means no genuine 401 surface — every failure here is a
+    // misconfiguration (missing agent_id, agent not found, etc.). Log
+    // it so the operator can debug from ErrorLog, then return a graceful
+    // 200 so the LLM apologises instead of retrying.
+    void logError(new Error(`Tool context load failed: ${verified.code}`), {
+      scope: 'tool-dispatch',
+      stage: 'load-context',
+      toolName,
+      code: verified.code,
+      message: verified.message,
+    });
     return NextResponse.json({
       success: false,
       error: 'Could not complete this action. Please try again or ask the human to follow up.',
@@ -62,24 +62,19 @@ export async function POST(
   const { ctx } = verified;
 
   // The tool handler needs the Call doc to record toolCalls + outcome.
-  // We look it up by externalCallId (set to ElevenLabs's conversation_id
-  // once the post-call webhook lands; before that it's `pending-{uuid}`
-  // — meaning tool calls during the FIRST call may not find a match if
-  // they arrive before post-call wires up the id).
+  // Prefer an exact match on conversation_id; otherwise fall back to the
+  // most recent in-progress Call for this agent — that catches tool calls
+  // fired before post-call upgrades the externalCallId from `pending-{uuid}`.
   const call = ctx.conversationId
     ? await Call.findOne({ externalCallId: ctx.conversationId })
     : null;
 
-  // Fallback: most recent pending Call for this agent. Catches the
-  // window between Phase 10's Call.create() and the post-call webhook
-  // upgrading `externalCallId`.
-  const fallbackCall =
-    !call && ctx.conversationId
-      ? await Call.findOne({
-          agentId: ctx.agent._id,
-          externalCallId: /^pending-/,
-        }).sort({ createdAt: -1 })
-      : null;
+  const fallbackCall = !call
+    ? await Call.findOne({
+        agentId: ctx.agent._id,
+        $or: [{ status: 'in-progress' }, { externalCallId: /^pending-/ }],
+      }).sort({ createdAt: -1 })
+    : null;
 
   const targetCall = call ?? fallbackCall;
 
