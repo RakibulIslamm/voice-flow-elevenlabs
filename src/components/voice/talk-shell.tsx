@@ -44,8 +44,15 @@ export function TalkShell({
 
       <div
         className={cn(
-          'relative flex w-full flex-col',
-          embed ? 'min-h-svh' : 'mx-auto max-w-md rounded-3xl border border-border/70 bg-card/80 shadow-[0_20px_60px_-20px_color-mix(in_oklch,var(--voice)_25%,transparent)] backdrop-blur-md',
+          'relative flex w-full flex-col overflow-hidden',
+          embed
+            ? 'h-svh'
+            : // Fixed-height card so the orb + transcript layout doesn't
+              // jump as messages stream in. On mobile we fill the viewport;
+              // on desktop the card is portrait-ish and capped to the
+              // viewport with a small margin so the page stays scrollable
+              // on tiny windows.
+              'mx-auto h-svh max-h-svh w-full max-w-md rounded-none border-0 bg-card/80 shadow-[0_20px_60px_-20px_color-mix(in_oklch,var(--voice)_25%,transparent)] backdrop-blur-md sm:h-180 sm:max-h-[calc(100svh-3rem)] sm:rounded-3xl sm:border sm:border-border/70',
         )}
       >
         {state === 'ready' ? (
@@ -66,8 +73,11 @@ function ReadyCard({ agent, embed }: { agent: TalkAgent; embed: boolean }) {
   return (
     <div
       className={cn(
-        'flex flex-1 flex-col gap-6 p-6 sm:p-8',
-        embed && 'min-h-svh justify-between p-5',
+        // `min-h-0` is the magic — without it, a flex child happily blows
+        // past its parent and breaks the inner `overflow-y-auto` on the
+        // transcript pane.
+        'flex h-full min-h-0 flex-1 flex-col gap-5 p-6 sm:p-8',
+        embed && 'p-5',
       )}
     >
       <Header agent={agent} embed={embed} />

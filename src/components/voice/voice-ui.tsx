@@ -308,17 +308,22 @@ export function VoiceUI({ agent }: { agent: TalkAgent }) {
   }, [teardown]);
 
   return (
-    <div className="flex flex-1 flex-col gap-5">
-      <div className="relative grid place-items-center">
+    // `min-h-0` lets the transcript child shrink inside the fixed-height
+    // card; without it, the flex column grows past its parent and the
+    // transcript's internal scroll never engages.
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="relative grid shrink-0 place-items-center">
         <TalkOrb state={state} onClick={startCall} getLevels={getLevels} />
       </div>
 
-      <StateCaption
-        state={state}
-        errorMessage={errorMessage}
-        onRetry={startCall}
-        onRestart={restart}
-      />
+      <div className="shrink-0">
+        <StateCaption
+          state={state}
+          errorMessage={errorMessage}
+          onRetry={startCall}
+          onRestart={restart}
+        />
+      </div>
 
       <Transcript transcript={transcript} ref={transcriptRef} state={state} agent={agent} />
 
@@ -326,7 +331,7 @@ export function VoiceUI({ agent }: { agent: TalkAgent }) {
         <Button
           variant="outline"
           onClick={endCall}
-          className="mx-auto border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          className="mx-auto shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
         >
           <PhoneOff className="size-4" />
           End call
@@ -796,18 +801,20 @@ function Transcript({
 
   if (transcript.length === 0 && state === 'idle') {
     return (
-      <div className="rounded-2xl border border-dashed border-border/60 bg-card/40 px-4 py-6 text-center text-xs text-muted-foreground">
-        <Sparkles className="mx-auto mb-2 size-4 text-voice" aria-hidden />
-        Transcript will appear here once the call starts.
+      <div className="flex min-h-0 flex-1 items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/40 px-4 py-6 text-center text-xs text-muted-foreground">
+        <div>
+          <Sparkles className="mx-auto mb-2 size-4 text-voice" aria-hidden />
+          Transcript will appear here once the call starts.
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div
         ref={ref}
-        className="max-h-72 space-y-3 overflow-y-auto rounded-2xl border border-border/60 bg-card/40 px-4 py-4"
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border/60 bg-card/40 px-4 py-4"
       >
         {transcript.map((entry, i) => (
           <Bubble key={i} entry={entry} />
@@ -815,7 +822,7 @@ function Transcript({
         {state === 'thinking' ? <TypingBubble /> : null}
       </div>
       {showCallEndedSummary ? (
-        <div className="rounded-xl border border-voice/30 bg-voice/5 px-4 py-3 text-xs leading-relaxed text-foreground">
+        <div className="shrink-0 rounded-xl border border-voice/30 bg-voice/5 px-4 py-3 text-xs leading-relaxed text-foreground">
           <p className="font-medium">Call summary</p>
           <p className="text-muted-foreground">
             {transcript.length} message{transcript.length === 1 ? '' : 's'} with{' '}
