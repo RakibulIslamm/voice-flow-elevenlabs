@@ -59,13 +59,13 @@ export function UserMenu({ user }: { user: UserMenuUser }) {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link href="/settings/account" className="cursor-pointer">
+          <Link href="/dashboard/settings" className="cursor-pointer">
             <Settings className="size-3.5" />
             Settings
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link href="/billing" className="cursor-pointer">
+          <Link href="/dashboard/billing" className="cursor-pointer">
             <CreditCard className="size-3.5" />
             Billing
           </Link>

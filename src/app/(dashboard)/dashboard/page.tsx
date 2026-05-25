@@ -1,57 +1,76 @@
-import { requireUserOrRedirect } from '@/lib/auth/guards';
-import { UserMenu } from '@/components/layout/user-menu';
+import { Bot, PhoneCall, Inbox, Gauge } from 'lucide-react';
+import { auth } from '~/auth';
+import { PageHeader } from '@/components/layout/page-header';
+import { EmptyState } from '@/components/states/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
-export default async function DashboardPage() {
-  const session = await requireUserOrRedirect('/dashboard');
+export const metadata = { title: 'Overview · VoiceFlow' };
+
+export default async function DashboardOverviewPage() {
+  const session = await auth();
+  const displayName = session?.user?.name?.split(' ')[0] ?? 'there';
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4 sm:px-10">
-        <h1 className="font-serif text-2xl tracking-tight">VoiceFlow</h1>
-        <UserMenu user={session.user} />
-      </header>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Overview"
+        title={`Welcome back, ${displayName}`}
+        description="Your agents, calls and captures appear here as soon as activity starts."
+      />
 
-      <main className="mx-auto max-w-3xl px-6 py-16 sm:px-10">
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-          Dashboard
-        </p>
-        <h2 className="mt-2 font-serif text-4xl tracking-tight text-foreground">
-          Welcome, {session.user.name ?? session.user.email}
-        </h2>
-        <p className="mt-3 max-w-xl text-muted-foreground">
-          Your agents, calls, and analytics land here in Phase 5. For now this is a
-          placeholder confirming that auth, middleware, and the session pipeline are wired
-          end-to-end.
-        </p>
+      <section
+        aria-label="Key metrics"
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
+      >
+        <StatCard icon="agents" label="Active Agents" />
+        <StatCard icon="calls" label="Calls This Month" />
+        <StatCard icon="captures" label="Captures This Month" />
+        <StatCard icon="usage" label="Plan Usage" />
+      </section>
 
-        <dl className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <DataPoint label="Plan" value={session.user.plan} />
-          <DataPoint label="Role" value={session.user.isAdmin ? 'Admin' : 'Member'} />
-          <DataPoint label="User ID" value={session.user.id} mono />
-        </dl>
-      </main>
+      <section className="space-y-3">
+        <h2 className="font-serif text-xl tracking-tight">Recent Calls</h2>
+        <EmptyState
+          icon={PhoneCall}
+          title="No calls yet"
+          description="Once your agent starts taking conversations, the latest ones will appear here with summaries and outcomes."
+        />
+      </section>
     </div>
   );
 }
 
-function DataPoint({
+const ICONS = {
+  agents: Bot,
+  calls: PhoneCall,
+  captures: Inbox,
+  usage: Gauge,
+} as const;
+
+function StatCard({
+  icon,
   label,
-  value,
-  mono,
+  className,
 }: {
+  icon: keyof typeof ICONS;
   label: string;
-  value: string;
-  mono?: boolean;
+  className?: string;
 }) {
+  const Icon = ICONS[icon];
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-3">
-      <dt className="text-xs uppercase tracking-wider text-muted-foreground">{label}</dt>
-      <dd
-        className={`mt-1 truncate text-sm text-foreground ${mono ? 'font-mono text-xs' : 'font-medium'}`}
-        title={value}
-      >
-        {value}
-      </dd>
+    <div
+      className={cn(
+        'rounded-xl border border-border bg-card p-5 shadow-sm transition hover:border-foreground/10',
+        className,
+      )}
+    >
+      <div className="flex items-center justify-between text-muted-foreground">
+        <p className="text-xs font-medium uppercase tracking-wider">{label}</p>
+        <Icon className="size-4" aria-hidden />
+      </div>
+      <Skeleton className="mt-4 h-7 w-20" />
+      <Skeleton className="mt-2 h-3 w-32" />
     </div>
   );
 }

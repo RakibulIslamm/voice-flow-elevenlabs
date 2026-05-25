@@ -80,6 +80,19 @@ src/
 widget/               # Standalone embed widget (builds to public/widget.js)
 ```
 
+## Admin access
+
+Admin status is a per-user flag in MongoDB; there's no self-serve promotion. To grant
+yourself the admin role:
+
+```bash
+mongosh "<your-mongodb-uri>" --quiet --eval \
+  'db.users.updateOne({email: "you@example.com"}, {$set: {isAdmin: true}})'
+```
+
+Sign out and back in to refresh the JWT — the new `isAdmin: true` claim only takes
+effect on the next session. The `/admin` link then appears in the sidebar.
+
 ## Architecture
 
 > Architecture diagram lands in Phase 15. Each phase adds one major capability — see project plan.
