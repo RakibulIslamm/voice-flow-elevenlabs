@@ -9,6 +9,8 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  Copy,
+  Globe2,
   Loader2,
   Mic,
   Plus,
@@ -17,11 +19,19 @@ import {
   Utensils,
   Sparkles,
   Wand2,
-  Volume2,
   X,
   Phone,
   Lock,
   ExternalLink,
+  CheckCircle2,
+  PauseCircle,
+  PlayCircle,
+  Wand,
+  Building2,
+  MessageCircleQuestion,
+  ScrollText,
+  Radio,
+  ClipboardCheck,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,8 +39,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { reportClientError } from '@/lib/tracking/client-report';
 import { createAgent, buildTemplateDefaults } from '@/server/actions/agents';
@@ -46,14 +54,14 @@ type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 type DayHours = { open?: string; close?: string; closed: boolean };
 type BusinessHours = Record<DayKey, DayHours>;
 
-const DAYS: { key: DayKey; label: string }[] = [
-  { key: 'mon', label: 'Mon' },
-  { key: 'tue', label: 'Tue' },
-  { key: 'wed', label: 'Wed' },
-  { key: 'thu', label: 'Thu' },
-  { key: 'fri', label: 'Fri' },
-  { key: 'sat', label: 'Sat' },
-  { key: 'sun', label: 'Sun' },
+const DAYS: { key: DayKey; label: string; short: string }[] = [
+  { key: 'mon', label: 'Monday', short: 'Mon' },
+  { key: 'tue', label: 'Tuesday', short: 'Tue' },
+  { key: 'wed', label: 'Wednesday', short: 'Wed' },
+  { key: 'thu', label: 'Thursday', short: 'Thu' },
+  { key: 'fri', label: 'Friday', short: 'Fri' },
+  { key: 'sat', label: 'Saturday', short: 'Sat' },
+  { key: 'sun', label: 'Sunday', short: 'Sun' },
 ];
 
 const TEMPLATE_OPTIONS: {
@@ -61,30 +69,55 @@ const TEMPLATE_OPTIONS: {
   title: string;
   description: string;
   icon: typeof Stethoscope;
+  badge?: string;
+  examples: string[];
 }[] = [
   {
     key: 'dental',
     title: 'Dental Clinic',
-    description: 'Books appointments, answers FAQs, handles dental emergencies.',
+    description: 'Books appointments, handles emergencies, and answers care questions.',
     icon: Stethoscope,
+    badge: 'Popular',
+    examples: ['Book a cleaning', 'Office hours', 'Emergency triage'],
   },
   {
     key: 'restaurant',
     title: 'Restaurant',
-    description: 'Takes reservations, mentions menu, handles wait list.',
+    description: 'Takes reservations, mentions the menu, and runs a wait list.',
     icon: Utensils,
+    examples: ['Reservations', 'Menu Q&A', 'Wait list'],
   },
   {
     key: 'lead-qualifier',
     title: 'Lead Qualifier',
-    description: 'Qualifies inbound leads with 3-4 questions, captures contact.',
+    description: 'Qualifies inbound leads with a few sharp questions, captures contact.',
     icon: Sparkles,
+    examples: ['Discovery', 'Budget check', 'Hand-off'],
   },
   {
     key: 'custom',
     title: 'Custom',
-    description: 'Start from scratch, configure everything.',
+    description: 'Start from scratch and configure everything yourself.',
     icon: Wand2,
+    examples: ['Anything', 'Anywhere', 'Anytime'],
+  },
+];
+
+const TONE_OPTIONS: { key: TonePreset; title: string; description: string }[] = [
+  {
+    key: 'professional',
+    title: 'Professional',
+    description: 'Polite and concise. Clean grammar, no filler.',
+  },
+  {
+    key: 'friendly',
+    title: 'Friendly',
+    description: 'Warm and personable. A touch of humour.',
+  },
+  {
+    key: 'casual',
+    title: 'Casual',
+    description: 'Speaks like a friend. Contractions, short sentences.',
   },
 ];
 
@@ -99,7 +132,17 @@ type Voice = {
   isCustom: boolean;
 };
 
-const TOTAL_STEPS = 7;
+const STEPS: { label: string; short: string; icon: typeof Wand }[] = [
+  { label: 'Template', short: 'Template', icon: Wand },
+  { label: 'Business', short: 'Business', icon: Building2 },
+  { label: 'Voice', short: 'Voice', icon: Mic },
+  { label: 'Knowledge', short: 'Knowledge', icon: MessageCircleQuestion },
+  { label: 'Prompt', short: 'Prompt', icon: ScrollText },
+  { label: 'Channels', short: 'Channels', icon: Radio },
+  { label: 'Review', short: 'Review', icon: ClipboardCheck },
+];
+
+const TOTAL_STEPS = STEPS.length;
 
 const PUBLIC_APP_URL = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(
   /\/$/,
@@ -168,11 +211,12 @@ export function AgentWizard() {
   const [direction, setDirection] = useState<1 | -1>(1);
   const [data, setData] = useState<WizardData>(emptyData);
   const [submitting, setSubmitting] = useState(false);
-  const [submitStage, setSubmitStage] = useState<string>('');
+  const [submitStage, setSubmitStage] = useState<'provisioning' | 'saving' | 'done'>(
+    'provisioning',
+  );
 
   const update = (patch: Partial<WizardData>) => setData((d) => ({ ...d, ...patch }));
 
-  // Auto-populate greeting when business name changes (Step 3 cue).
   useEffect(() => {
     if (!data.businessName) return;
     setData((d) =>
@@ -180,11 +224,9 @@ export function AgentWizard() {
         ? d
         : { ...d, greeting: `Hi, you've reached ${d.businessName}. How can I help you today?` },
     );
-    // We only want to *seed* the greeting once when it's still empty.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.businessName]);
 
-  // Generate slug client-side on first entry to step 6.
   useEffect(() => {
     if (step !== 6) return;
     if (data.publicSlug) return;
@@ -193,7 +235,6 @@ export function AgentWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
-  // Stepping
   const canContinue = useMemo(() => validateStep(step, data), [step, data]);
 
   const next = () => {
@@ -205,11 +246,16 @@ export function AgentWizard() {
     setDirection(-1);
     setStep((s) => Math.max(1, s - 1));
   };
+  const jumpTo = (n: number) => {
+    if (n >= step) return;
+    setDirection(-1);
+    setStep(n);
+  };
 
   async function handleSubmit() {
     if (!data.template) return;
     setSubmitting(true);
-    setSubmitStage('Provisioning agent in your ElevenLabs account…');
+    setSubmitStage('provisioning');
 
     try {
       const result = await createAgent({
@@ -228,11 +274,13 @@ export function AgentWizard() {
         allowedDomains: data.allowedDomains,
       });
 
-      setSubmitStage('Saving to your dashboard…');
+      setSubmitStage('saving');
 
       if (result.ok) {
+        setSubmitStage('done');
         toast.success('Agent created!');
-        router.push(`/dashboard/agents/${result.data.agentId}`);
+        // Tiny delay so the user gets a beat of the success state.
+        setTimeout(() => router.push(`/dashboard/agents/${result.data.agentId}`), 450);
       } else {
         toast.error(result.error.message, {
           description: 'Try again, or check Integrations if your ElevenLabs status changed.',
@@ -256,20 +304,40 @@ export function AgentWizard() {
   }
 
   return (
-    <div className="relative space-y-10">
-      {/* Progress + step counter */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <p className="font-medium uppercase tracking-[0.18em] text-voice">
-            Step {step} of {TOTAL_STEPS}
+    <div className="relative mx-auto w-full max-w-4xl space-y-10 pb-24">
+      {/* Page header */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <Link
+            href="/dashboard/agents"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition hover:text-foreground"
+          >
+            <ArrowLeft className="size-3.5" />
+            Back to agents
+          </Link>
+          <p className="text-xs text-muted-foreground">
+            <span className="hidden sm:inline">Press </span>
+            <kbd className="rounded border border-border/70 bg-card px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              Esc
+            </kbd>{' '}
+            anytime to cancel
           </p>
-          <p>{stepTitle(step)}</p>
         </div>
-        <Progress value={(step / TOTAL_STEPS) * 100} className="h-1" />
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.22em] text-voice">
+            Create agent
+          </p>
+          <h1 className="mt-1.5 font-serif text-3xl tracking-tight sm:text-4xl">
+            Build your AI receptionist
+          </h1>
+        </div>
       </div>
 
+      {/* Stepper */}
+      <Stepper step={step} onJump={jumpTo} />
+
       {/* Step content */}
-      <div className="relative min-h-[420px]">
+      <div className="relative min-h-[440px]">
         <AnimatePresence custom={direction} mode="wait" initial={false}>
           <motion.div
             key={step}
@@ -291,44 +359,122 @@ export function AgentWizard() {
         </AnimatePresence>
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between border-t border-border/70 pt-6">
-        <Button variant="ghost" onClick={back} disabled={step === 1 || submitting}>
-          <ArrowLeft className="size-4" />
-          Back
-        </Button>
-        {step < TOTAL_STEPS ? (
-          <Button onClick={next} disabled={!canContinue || submitting}>
-            Continue
-            <ArrowRight className="size-4" />
+      {/* Sticky footer */}
+      <div className="sticky bottom-4 z-10 mt-auto rounded-2xl border border-border/70 bg-card/80 px-4 py-3 shadow-[0_8px_30px_color-mix(in_oklch,var(--background)_50%,transparent)] backdrop-blur-md">
+        <div className="flex items-center justify-between gap-3">
+          <Button
+            variant="ghost"
+            onClick={back}
+            disabled={step === 1 || submitting}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+            Back
           </Button>
-        ) : (
-          <Button onClick={handleSubmit} disabled={!canContinue || submitting}>
-            {submitting ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                Creating…
-              </>
-            ) : (
-              <>
-                <Check className="size-4" />
-                Create Agent
-              </>
-            )}
-          </Button>
-        )}
+          <p className="hidden text-[11px] text-muted-foreground sm:block">
+            {step === TOTAL_STEPS
+              ? 'Last step — ready when you are.'
+              : `Step ${step} of ${TOTAL_STEPS} · ${STEPS[step - 1].label}`}
+          </p>
+          {step < TOTAL_STEPS ? (
+            <Button onClick={next} disabled={!canContinue || submitting} size="lg">
+              Continue
+              <ArrowRight className="size-4" />
+            </Button>
+          ) : (
+            <Button onClick={handleSubmit} disabled={!canContinue || submitting} size="lg">
+              {submitting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Creating…
+                </>
+              ) : (
+                <>
+                  <Check className="size-4" />
+                  Create Agent
+                </>
+              )}
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Submitting overlay */}
-      {submitting ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-background/70 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-4 rounded-2xl border border-border bg-card px-8 py-10 shadow-xl">
-            <Loader2 className="size-8 animate-spin text-voice" />
-            <p className="font-serif text-xl tracking-tight">Creating your agent</p>
-            <p className="max-w-xs text-center text-sm text-muted-foreground">{submitStage}</p>
-          </div>
-        </div>
-      ) : null}
+      <AnimatePresence>
+        {submitting ? <SubmittingOverlay stage={submitStage} /> : null}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Stepper
+// ---------------------------------------------------------------------------
+
+function Stepper({ step, onJump }: { step: number; onJump: (n: number) => void }) {
+  return (
+    <div className="rounded-2xl border border-border/60 bg-card/40 px-3 py-3 backdrop-blur-sm sm:px-4 sm:py-4">
+      <ol className="flex items-center gap-1 sm:gap-2">
+        {STEPS.map((s, i) => {
+          const n = i + 1;
+          const done = n < step;
+          const current = n === step;
+          const last = i === STEPS.length - 1;
+          const Icon = s.icon;
+          return (
+            <li key={s.label} className="flex flex-1 items-center gap-1 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => done && onJump(n)}
+                disabled={!done}
+                className={cn(
+                  'group flex shrink-0 flex-col items-center gap-1.5 outline-none transition',
+                  done && 'cursor-pointer',
+                )}
+                aria-label={`Step ${n}: ${s.label}`}
+                aria-current={current ? 'step' : undefined}
+              >
+                <span
+                  className={cn(
+                    'grid size-8 place-items-center rounded-full text-[11px] font-semibold transition group-focus-visible:ring-2 group-focus-visible:ring-voice/50',
+                    done && 'bg-voice text-voice-foreground shadow-sm group-hover:opacity-90',
+                    current && 'bg-voice/15 text-voice ring-2 ring-voice/40',
+                    !done && !current && 'bg-muted text-muted-foreground/70',
+                  )}
+                >
+                  {done ? (
+                    <Check className="size-4" aria-hidden />
+                  ) : current ? (
+                    <Icon className="size-4" aria-hidden />
+                  ) : (
+                    n
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    'hidden text-[10px] font-medium uppercase tracking-[0.14em] transition sm:block',
+                    current
+                      ? 'text-foreground'
+                      : done
+                      ? 'text-foreground/70'
+                      : 'text-muted-foreground/60',
+                  )}
+                >
+                  {s.short}
+                </span>
+              </button>
+              {!last ? (
+                <span
+                  aria-hidden
+                  className={cn(
+                    'mb-4 h-px flex-1 transition sm:mb-5',
+                    done ? 'bg-voice/50' : 'bg-border/60',
+                  )}
+                />
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }
@@ -345,8 +491,12 @@ function StepTemplate({
   update: (p: Partial<WizardData>) => void;
 }) {
   return (
-    <div className="space-y-6">
-      <Heading title="Pick a starting point" hint="You can change the prompt and tools later." />
+    <div className="space-y-7">
+      <Heading
+        eyebrow="Step 1"
+        title="Pick a starting point"
+        hint="We'll seed the prompt, tools, and FAQ for you. You can change everything later."
+      />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {TEMPLATE_OPTIONS.map((opt) => {
           const Icon = opt.icon;
@@ -357,29 +507,56 @@ function StepTemplate({
               type="button"
               onClick={() => update({ template: opt.key })}
               className={cn(
-                'group flex items-start gap-3 rounded-2xl border bg-card/60 p-5 text-left transition',
+                'group relative flex flex-col gap-4 overflow-hidden rounded-2xl border bg-card/60 p-5 text-left transition',
                 active
-                  ? 'border-voice/60 ring-2 ring-voice/30'
-                  : 'border-border/70 hover:border-voice/40',
+                  ? 'border-voice/60 shadow-[0_0_0_4px_color-mix(in_oklch,var(--voice)_15%,transparent)]'
+                  : 'border-border/70 hover:-translate-y-0.5 hover:border-voice/40',
               )}
             >
-              <div
-                className={cn(
-                  'grid size-10 shrink-0 place-items-center rounded-xl ring-1 transition',
-                  active
-                    ? 'bg-voice text-voice-foreground ring-voice'
-                    : 'bg-voice/10 text-voice ring-voice/20',
-                )}
-              >
-                <Icon className="size-5" aria-hidden />
+              {active ? (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-voice/70 to-transparent"
+                />
+              ) : null}
+              <div className="flex items-start justify-between">
+                <div
+                  className={cn(
+                    'grid size-11 place-items-center rounded-xl ring-1 transition',
+                    active
+                      ? 'bg-voice text-voice-foreground ring-voice'
+                      : 'bg-voice/10 text-voice ring-voice/20 group-hover:bg-voice/15',
+                  )}
+                >
+                  <Icon className="size-5" aria-hidden />
+                </div>
+                <div className="flex items-center gap-2">
+                  {opt.badge ? (
+                    <Badge variant="outline" className="border-voice/40 text-[10px] text-voice">
+                      {opt.badge}
+                    </Badge>
+                  ) : null}
+                  {active ? (
+                    <span className="grid size-6 place-items-center rounded-full bg-voice text-voice-foreground">
+                      <Check className="size-3.5" aria-hidden />
+                    </span>
+                  ) : null}
+                </div>
               </div>
-              <div className="flex-1">
+              <div className="space-y-1.5">
                 <p className="font-medium text-foreground">{opt.title}</p>
-                <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
-                  {opt.description}
-                </p>
+                <p className="text-sm leading-relaxed text-muted-foreground">{opt.description}</p>
               </div>
-              {active ? <Check className="size-4 text-voice" aria-hidden /> : null}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {opt.examples.map((ex) => (
+                  <span
+                    key={ex}
+                    className="rounded-full bg-muted/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground"
+                  >
+                    {ex}
+                  </span>
+                ))}
+              </div>
             </button>
           );
         })}
@@ -399,34 +576,70 @@ function StepBusiness({
   data: WizardData;
   update: (p: Partial<WizardData>) => void;
 }) {
+  function copyMonFriToWeekday() {
+    const ref = data.businessHours.mon;
+    update({
+      businessHours: {
+        ...data.businessHours,
+        tue: { ...ref },
+        wed: { ...ref },
+        thu: { ...ref },
+        fri: { ...ref },
+      },
+    });
+  }
+
   return (
     <div className="space-y-7">
       <Heading
+        eyebrow="Step 2"
         title="Tell us about the business"
-        hint="The agent uses these details to answer questions and confirm bookings."
+        hint="The agent uses these to answer questions and confirm bookings."
       />
-      <div className="space-y-1.5">
-        <Label htmlFor="businessName">Business name</Label>
-        <Input
-          id="businessName"
-          value={data.businessName}
-          maxLength={80}
-          onChange={(e) => update({ businessName: e.target.value })}
-          placeholder="Sunrise Dental"
-        />
-      </div>
 
-      <div>
-        <Label className="mb-3 block">Business hours</Label>
-        <div className="space-y-2">
-          {DAYS.map(({ key, label }) => {
+      <SectionCard>
+        <FieldGroup label="Business name" required>
+          <Input
+            id="businessName"
+            value={data.businessName}
+            maxLength={80}
+            onChange={(e) => update({ businessName: e.target.value })}
+            placeholder="Sunrise Dental"
+            className="h-11"
+          />
+        </FieldGroup>
+      </SectionCard>
+
+      <SectionCard>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <Label className="text-sm">Business hours</Label>
+          <button
+            type="button"
+            onClick={copyMonFriToWeekday}
+            className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            Apply Monday to all weekdays
+          </button>
+        </div>
+        <div className="space-y-1.5">
+          {DAYS.map(({ key, label, short }) => {
             const day = data.businessHours[key];
             return (
               <div
                 key={key}
-                className="grid grid-cols-[60px_1fr_1fr_auto] items-center gap-3 rounded-lg border border-border/60 bg-card/40 px-3 py-2"
+                className={cn(
+                  'grid grid-cols-[80px_1fr_auto_1fr_auto] items-center gap-3 rounded-xl border bg-card/40 px-3 py-2 transition sm:grid-cols-[120px_1fr_auto_1fr_auto]',
+                  day.closed
+                    ? 'border-border/40 opacity-60'
+                    : 'border-border/60 hover:border-border',
+                )}
               >
-                <span className="text-sm font-medium text-foreground">{label}</span>
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-foreground">
+                    <span className="sm:hidden">{short}</span>
+                    <span className="hidden sm:inline">{label}</span>
+                  </span>
+                </div>
                 <Input
                   type="time"
                   value={day.open ?? ''}
@@ -441,6 +654,7 @@ function StepBusiness({
                   }
                   className="h-9"
                 />
+                <span className="text-xs text-muted-foreground">to</span>
                 <Input
                   type="time"
                   value={day.close ?? ''}
@@ -467,33 +681,37 @@ function StepBusiness({
                       })
                     }
                   />
-                  Closed
+                  <span className="hidden sm:inline">Closed</span>
                 </label>
               </div>
             );
           })}
         </div>
-      </div>
+      </SectionCard>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor="location">Location (optional)</Label>
-          <Input
-            id="location"
-            value={data.location}
-            onChange={(e) => update({ location: e.target.value })}
-            placeholder="123 Main St, Boston, MA"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="phone">Phone (optional)</Label>
-          <Input
-            id="phone"
-            value={data.phone}
-            onChange={(e) => update({ phone: e.target.value })}
-            placeholder="+1 555 123 4567"
-          />
-        </div>
+        <SectionCard>
+          <FieldGroup label="Location (optional)" hint="Used when callers ask 'where are you?'">
+            <Input
+              id="location"
+              value={data.location}
+              onChange={(e) => update({ location: e.target.value })}
+              placeholder="123 Main St, Boston, MA"
+              className="h-11"
+            />
+          </FieldGroup>
+        </SectionCard>
+        <SectionCard>
+          <FieldGroup label="Phone (optional)" hint="For human-transfer fallback.">
+            <Input
+              id="phone"
+              value={data.phone}
+              onChange={(e) => update({ phone: e.target.value })}
+              placeholder="+1 555 123 4567"
+              className="h-11"
+            />
+          </FieldGroup>
+        </SectionCard>
       </div>
     </div>
   );
@@ -563,70 +781,100 @@ function StepVoice({
   return (
     <div className="space-y-7">
       <Heading
+        eyebrow="Step 3"
         title="Give it a voice"
-        hint="The bot name and greeting are what callers hear first. The voice picks how it sounds."
+        hint="Bot name and greeting are what callers hear first. Pick a voice that fits."
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor="agentName">Bot name</Label>
-          <Input
-            id="agentName"
-            value={data.agentName}
-            maxLength={40}
-            onChange={(e) => update({ agentName: e.target.value })}
-            placeholder="Sarah"
-          />
+      <SectionCard>
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <FieldGroup label="Bot name" required>
+            <Input
+              id="agentName"
+              value={data.agentName}
+              maxLength={40}
+              onChange={(e) => update({ agentName: e.target.value })}
+              placeholder="Sarah"
+              className="h-11"
+            />
+          </FieldGroup>
+          <FieldGroup label="Tone">
+            <div className="grid grid-cols-3 gap-1.5">
+              {TONE_OPTIONS.map((t) => {
+                const active = data.tonePreset === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => update({ tonePreset: t.key })}
+                    className={cn(
+                      'flex flex-col items-start gap-0.5 rounded-xl border bg-card/50 px-3 py-2.5 text-left transition',
+                      active
+                        ? 'border-voice/60 ring-2 ring-voice/20'
+                        : 'border-border/70 hover:border-voice/40',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'text-sm font-medium',
+                        active ? 'text-foreground' : 'text-foreground/80',
+                      )}
+                    >
+                      {t.title}
+                    </span>
+                    <span className="hidden text-[10px] leading-tight text-muted-foreground sm:block">
+                      {t.description}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </FieldGroup>
         </div>
-        <div className="space-y-1.5">
-          <Label>Tone</Label>
-          <RadioGroup
-            value={data.tonePreset}
-            onValueChange={(v) => update({ tonePreset: v as TonePreset })}
-            className="flex flex-wrap gap-3"
-          >
-            {(['professional', 'friendly', 'casual'] as TonePreset[]).map((t) => (
-              <label
-                key={t}
-                className={cn(
-                  'inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-sm capitalize transition',
-                  data.tonePreset === t
-                    ? 'border-voice/60 bg-voice/10 text-foreground'
-                    : 'border-border/70 text-muted-foreground hover:text-foreground',
-                )}
-              >
-                <RadioGroupItem value={t} className="size-3" />
-                {t}
-              </label>
-            ))}
-          </RadioGroup>
-        </div>
-      </div>
 
-      <div className="space-y-1.5">
-        <div className="flex items-end justify-between gap-2">
-          <Label htmlFor="greeting">Greeting</Label>
-          <span className="text-xs text-muted-foreground">{greetingLen}/200</span>
+        <div className="mt-5">
+          <FieldGroup
+            label="Greeting"
+            required
+            trailing={
+              <span className="text-xs text-muted-foreground">
+                {greetingLen}/200
+              </span>
+            }
+          >
+            <Textarea
+              id="greeting"
+              value={data.greeting}
+              maxLength={200}
+              rows={3}
+              onChange={(e) => update({ greeting: e.target.value })}
+              placeholder={`Hi, you've reached ${data.businessName || 'your business'}. How can I help?`}
+              className="leading-relaxed"
+            />
+          </FieldGroup>
         </div>
-        <Textarea
-          id="greeting"
-          value={data.greeting}
-          maxLength={200}
-          rows={3}
-          onChange={(e) => update({ greeting: e.target.value })}
-          placeholder={`Hi, you've reached ${data.businessName || 'your business'}. How can I help?`}
-        />
-      </div>
+      </SectionCard>
 
       <div className="space-y-3">
-        <Label>Voice</Label>
+        <div className="flex items-end justify-between gap-2">
+          <Label className="text-sm">Voice</Label>
+          {voices && voices.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {voices.length} voice{voices.length === 1 ? '' : 's'} in your ElevenLabs account
+            </p>
+          ) : null}
+        </div>
         {voices === null ? (
-          <div className="flex items-center gap-2 rounded-lg border border-dashed border-border/70 bg-card/40 px-4 py-8 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Loading voices from your ElevenLabs
-            account…
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {[0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="h-[70px] animate-pulse rounded-xl border border-dashed border-border/60 bg-card/30"
+              />
+            ))}
           </div>
         ) : voices.length === 0 ? (
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
             {error ?? 'No voices available in your ElevenLabs account.'} Check your ElevenLabs
             subscription and try again.
           </div>
@@ -636,62 +884,66 @@ function StepVoice({
               const active = data.voiceId === v.voiceId;
               const isPlaying = playingId === v.voiceId;
               return (
-                <button
+                <div
                   key={v.voiceId}
-                  type="button"
-                  onClick={() => update({ voiceId: v.voiceId })}
                   className={cn(
-                    'group flex items-start gap-3 rounded-xl border bg-card/60 p-3 text-left transition',
+                    'group flex items-center gap-3 rounded-xl border bg-card/60 p-3 transition',
                     active
-                      ? 'border-voice/60 ring-2 ring-voice/30'
+                      ? 'border-voice/60 shadow-[0_0_0_3px_color-mix(in_oklch,var(--voice)_12%,transparent)]'
                       : 'border-border/70 hover:border-voice/40',
                   )}
                 >
-                  <div
-                    className={cn(
-                      'grid size-9 shrink-0 place-items-center rounded-lg ring-1',
-                      active
-                        ? 'bg-voice text-voice-foreground ring-voice'
-                        : 'bg-voice/10 text-voice ring-voice/20',
-                    )}
+                  <button
+                    type="button"
+                    onClick={() => update({ voiceId: v.voiceId })}
+                    className="flex flex-1 items-center gap-3 text-left"
+                    aria-pressed={active}
                   >
-                    <Mic className="size-4" aria-hidden />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate font-medium text-foreground">{v.name}</p>
-                      {v.isCustom ? (
-                        <Badge variant="outline" className="text-[10px]">
-                          Custom
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {[v.accent, v.gender].filter(Boolean).join(' · ') || 'Premade voice'}
-                    </p>
-                  </div>
-                  {v.previewUrl ? (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        togglePreview(v);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          togglePreview(v);
-                        }
-                      }}
-                      className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                    <div
+                      className={cn(
+                        'grid size-10 shrink-0 place-items-center rounded-lg ring-1 transition',
+                        active
+                          ? 'bg-voice text-voice-foreground ring-voice'
+                          : 'bg-voice/10 text-voice ring-voice/20 group-hover:bg-voice/15',
+                      )}
                     >
-                      <Volume2 className="size-3" />
+                      {active ? <Check className="size-4" /> : <Mic className="size-4" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate font-medium text-foreground">{v.name}</p>
+                        {v.isCustom ? (
+                          <Badge variant="outline" className="text-[10px]">
+                            Custom
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {[v.accent, v.gender].filter(Boolean).join(' · ') || 'Premade voice'}
+                      </p>
+                    </div>
+                  </button>
+                  {v.previewUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => togglePreview(v)}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition',
+                        isPlaying
+                          ? 'border-voice/40 bg-voice/10 text-voice'
+                          : 'border-border/70 bg-background text-muted-foreground hover:text-foreground',
+                      )}
+                      aria-label={isPlaying ? 'Stop preview' : 'Play preview'}
+                    >
+                      {isPlaying ? (
+                        <PauseCircle className="size-3.5" />
+                      ) : (
+                        <PlayCircle className="size-3.5" />
+                      )}
                       {isPlaying ? 'Stop' : 'Preview'}
-                    </span>
+                    </button>
                   ) : null}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -712,8 +964,6 @@ function StepFaq({
   data: WizardData;
   update: (p: Partial<WizardData>) => void;
 }) {
-  // Seed empty Q&A rows the first time we land here, but never overwrite
-  // what the user has already typed.
   useEffect(() => {
     if (data.faq.length > 0) return;
     update({
@@ -738,25 +988,41 @@ function StepFaq({
     update({ faq: data.faq.filter((_, idx) => idx !== i) });
   }
 
-  const limit = 20; // Phase 13 will enforce real per-plan limits
+  const limit = 20;
+  const filled = data.faq.filter((r) => r.question.trim() && r.answer.trim()).length;
 
   return (
     <div className="space-y-7">
       <Heading
+        eyebrow="Step 4 · optional"
         title="Knowledge & FAQ"
         hint="Common questions and the answers you want the agent to give. Skip rows you don't need."
       />
+
+      <div className="flex items-center justify-between rounded-xl border border-border/60 bg-card/40 px-4 py-2.5 text-xs">
+        <span className="text-muted-foreground">
+          {filled} of {data.faq.length} filled
+        </span>
+        <span className="text-muted-foreground">{limit - data.faq.length} more slots available</span>
+      </div>
+
       <div className="space-y-3">
         {data.faq.map((row, i) => (
-          <div key={i} className="rounded-2xl border border-border/70 bg-card/50 p-4">
+          <div
+            key={i}
+            className="group rounded-2xl border border-border/70 bg-card/50 p-4 transition hover:border-border"
+          >
             <div className="flex items-center justify-between">
-              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <span className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="grid size-5 place-items-center rounded-full bg-voice/15 text-[10px] font-semibold text-voice">
+                  {i + 1}
+                </span>
                 Question {i + 1}
-              </p>
+              </span>
               <button
                 type="button"
                 onClick={() => remove(i)}
-                className="text-xs text-muted-foreground hover:text-destructive"
+                className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
                 aria-label={`Remove question ${i + 1}`}
               >
                 <X className="size-3.5" />
@@ -828,7 +1094,6 @@ function StepPrompt({
     });
   }
 
-  // Auto-generate ONCE on first entry to this step.
   const seededRef = useRef(false);
   useEffect(() => {
     if (seededRef.current) return;
@@ -841,29 +1106,62 @@ function StepPrompt({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const charCount = data.systemPrompt.length;
+  const wordCount = data.systemPrompt.trim() ? data.systemPrompt.trim().split(/\s+/).length : 0;
+
   return (
     <div className="space-y-6">
       <Heading
+        eyebrow="Step 5"
         title="System prompt"
-        hint="This is the agent's brain. We've generated a starting point — edit anything you want to change."
+        hint="The agent's brain. We've generated a starting point — edit anything you want to change."
       />
-      <div className="flex items-center justify-end">
-        <Button variant="ghost" size="sm" onClick={generateDefault} disabled={pending}>
-          {pending ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <RotateCcw className="size-3.5" />
-          )}
-          Reset to template default
-        </Button>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_240px]">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Prompt
+            </span>
+            <Button variant="ghost" size="sm" onClick={generateDefault} disabled={pending}>
+              {pending ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="size-3.5" />
+              )}
+              Reset to template default
+            </Button>
+          </div>
+          <div className="rounded-2xl border border-border/70 bg-card/40 p-1.5">
+            <Textarea
+              value={data.systemPrompt}
+              onChange={(e) => update({ systemPrompt: e.target.value })}
+              rows={18}
+              className="resize-y border-0 bg-transparent font-mono text-xs leading-relaxed shadow-none focus-visible:ring-0"
+              placeholder="Loading default…"
+            />
+            <div className="flex items-center justify-between border-t border-border/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+              <span>
+                {wordCount.toLocaleString()} words · {charCount.toLocaleString()} chars
+              </span>
+              <span>{charCount > 10_000 ? 'Long prompts cost more latency' : 'Looks good'}</span>
+            </div>
+          </div>
+        </div>
+
+        <aside className="space-y-3 self-start rounded-2xl border border-border/60 bg-card/40 p-4 text-xs leading-relaxed">
+          <div className="flex items-center gap-2 text-foreground">
+            <Sparkles className="size-3.5 text-voice" />
+            <span className="font-medium">Prompt tips</span>
+          </div>
+          <ul className="space-y-2 text-muted-foreground">
+            <li>• Open with a one-line identity ("You are Sarah, …").</li>
+            <li>• Spell out tone, pace, and brevity rules.</li>
+            <li>• List the exact tools the agent can use.</li>
+            <li>• End with edge cases — what to do when unsure.</li>
+          </ul>
+        </aside>
       </div>
-      <Textarea
-        value={data.systemPrompt}
-        onChange={(e) => update({ systemPrompt: e.target.value })}
-        rows={15}
-        className="font-mono text-xs leading-relaxed"
-        placeholder="Loading default…"
-      />
     </div>
   );
 }
@@ -880,6 +1178,7 @@ function StepChannels({
   update: (p: Partial<WizardData>) => void;
 }) {
   const [domainInput, setDomainInput] = useState('');
+  const [copied, setCopied] = useState(false);
 
   function regenerateSlug() {
     update({ publicSlug: makeSlug(data.businessName) });
@@ -901,47 +1200,82 @@ function StepChannels({
 
   const publicUrl = `${PUBLIC_APP_URL}/talk/${data.publicSlug || 'your-slug'}`;
 
+  async function copyPublicUrl() {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      toast.error('Could not copy. Select and copy manually.');
+    }
+  }
+
   return (
     <div className="space-y-7">
       <Heading
+        eyebrow="Step 6"
         title="Channels"
         hint="Where your callers reach the agent. Browser is on by default; phone requires Pro."
       />
 
-      {/* Browser */}
-      <section className="rounded-2xl border border-border/70 bg-card/60 p-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Mic className="size-4 text-voice" />
-            <p className="font-medium">Browser</p>
-            <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-              Enabled
-            </Badge>
+      <section className="overflow-hidden rounded-2xl border border-border/70 bg-card/60">
+        <div className="flex items-center justify-between border-b border-border/60 bg-card/40 px-5 py-3">
+          <div className="flex items-center gap-2.5">
+            <div className="grid size-8 place-items-center rounded-lg bg-voice/10 text-voice ring-1 ring-voice/20">
+              <Globe2 className="size-4" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Browser</p>
+              <p className="text-[11px] text-muted-foreground">
+                A public page anyone can talk to from a browser
+              </p>
+            </div>
           </div>
+          <Badge className="bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300">
+            <CheckCircle2 className="mr-1 size-3" />
+            Enabled
+          </Badge>
         </div>
-        <div className="mt-4 space-y-3">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Public URL
-            </p>
-            <div className="mt-1 flex items-center gap-2 rounded-md border border-border/70 bg-muted/40 px-2.5 py-1.5">
-              <code className="min-w-0 flex-1 truncate font-mono text-xs">{publicUrl}</code>
+
+        <div className="space-y-5 px-5 py-4">
+          <FieldGroup
+            label="Public URL"
+            hint="Share this link with your audience. We'll generate a short, friendly slug."
+            trailing={
               <button
                 type="button"
                 onClick={regenerateSlug}
-                className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
                 disabled={!data.businessName}
+                className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Regenerate
               </button>
+            }
+          >
+            <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/40 px-3 py-2">
+              <code className="min-w-0 flex-1 truncate font-mono text-xs">{publicUrl}</code>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={copyPublicUrl}
+                className="h-7 gap-1.5 px-2 text-xs"
+              >
+                {copied ? (
+                  <Check className="size-3.5 text-emerald-500" />
+                ) : (
+                  <Copy className="size-3.5" />
+                )}
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
             </div>
-          </div>
+          </FieldGroup>
 
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Allowed domains
-            </p>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5 rounded-md border border-border/70 bg-card px-2 py-1.5">
+          <FieldGroup
+            label="Allowed domains"
+            hint="Where the agent embed can be loaded from. Leave empty to allow any domain — strongly recommended in production to lock down embeds."
+          >
+            <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border/70 bg-card px-2 py-1.5 transition focus-within:border-voice/50">
               {data.allowedDomains.map((d) => (
                 <span
                   key={d}
@@ -969,36 +1303,38 @@ function StepChannels({
                 }}
                 onBlur={addDomain}
                 placeholder="example.com, mysite.com…"
-                className="min-w-[120px] flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                className="min-w-[140px] flex-1 bg-transparent py-1 text-xs outline-none placeholder:text-muted-foreground"
               />
             </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              Leave empty to allow any domain — strongly recommended for production to lock down
-              embeds.
-            </p>
-          </div>
+          </FieldGroup>
         </div>
       </section>
 
-      {/* Phone — Pro-locked */}
       <section className="rounded-2xl border border-dashed border-border/70 bg-card/30 p-5">
-        <div className="flex items-center gap-2">
-          <Phone className="size-4 text-muted-foreground" />
-          <p className="font-medium text-muted-foreground">Phone</p>
-          <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
-            <Lock className="mr-1 size-2.5" /> Pro plan required
-          </Badge>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="grid size-8 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border/60">
+              <Phone className="size-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium text-muted-foreground">Phone</p>
+                <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+                  <Lock className="mr-1 size-2.5" /> Pro
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Connect a Twilio number to take inbound calls. Set up after agent creation.
+              </p>
+            </div>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/dashboard/billing">
+              Upgrade
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </Button>
         </div>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Connect a Twilio number to take inbound calls. Phone setup lives on the agent detail
-          page after creation — Phase 12.
-        </p>
-        <Button asChild variant="outline" size="sm" className="mt-3">
-          <Link href="/dashboard/billing">
-            Upgrade to Pro
-            <ArrowRight className="size-3.5" />
-          </Link>
-        </Button>
       </section>
     </div>
   );
@@ -1009,34 +1345,67 @@ function StepChannels({
 // ---------------------------------------------------------------------------
 
 function StepReview({ data }: { data: WizardData }) {
+  const templateLabel =
+    TEMPLATE_OPTIONS.find((t) => t.key === data.template)?.title ?? data.template ?? '—';
+  const toneLabel = TONE_OPTIONS.find((t) => t.key === data.tonePreset)?.title ?? data.tonePreset;
+  const hoursSummary = renderHoursText(data.businessHours) || '—';
+  const filledFaqs = data.faq.filter((r) => r.question.trim() && r.answer.trim()).length;
+
   return (
     <div className="space-y-7">
       <Heading
+        eyebrow="Step 7"
         title="Review & create"
         hint="Last look before we provision this agent in your ElevenLabs account."
       />
 
-      <dl className="grid grid-cols-1 gap-x-6 gap-y-4 rounded-2xl border border-border/70 bg-card/50 p-5 sm:grid-cols-2">
-        <Field label="Template" value={data.template ?? '—'} />
-        <Field label="Business" value={data.businessName} />
-        <Field label="Bot name" value={data.agentName} />
-        <Field label="Tone" value={data.tonePreset} />
-        <Field label="Voice ID" value={data.voiceId} mono />
-        <Field label="Public URL" value={`/talk/${data.publicSlug}`} mono />
-        <Field
-          label="Allowed domains"
-          value={data.allowedDomains.length === 0 ? 'Any (open)' : data.allowedDomains.join(', ')}
-          full
-        />
-        <Field label="Greeting" value={data.greeting} full />
-      </dl>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ReviewCard icon={Wand} title="Template & tone">
+          <ReviewRow label="Template" value={templateLabel} />
+          <ReviewRow label="Tone" value={toneLabel} />
+        </ReviewCard>
+
+        <ReviewCard icon={Building2} title="Business">
+          <ReviewRow label="Name" value={data.businessName} />
+          <ReviewRow label="Hours" value={hoursSummary} />
+          {data.location ? <ReviewRow label="Location" value={data.location} /> : null}
+          {data.phone ? <ReviewRow label="Phone" value={data.phone} /> : null}
+        </ReviewCard>
+
+        <ReviewCard icon={Mic} title="Voice">
+          <ReviewRow label="Bot name" value={data.agentName} />
+          <ReviewRow label="Voice ID" value={data.voiceId} mono />
+          <ReviewRow label="Greeting" value={data.greeting} />
+        </ReviewCard>
+
+        <ReviewCard icon={MessageCircleQuestion} title="Knowledge">
+          <ReviewRow
+            label="FAQ entries"
+            value={`${filledFaqs} filled${filledFaqs === 0 ? ' (none, OK)' : ''}`}
+          />
+          <ReviewRow
+            label="Prompt"
+            value={`${data.systemPrompt.length.toLocaleString()} chars`}
+          />
+        </ReviewCard>
+
+        <ReviewCard icon={Globe2} title="Channels" className="lg:col-span-2">
+          <ReviewRow label="Public URL" value={`/talk/${data.publicSlug}`} mono />
+          <ReviewRow
+            label="Allowed domains"
+            value={
+              data.allowedDomains.length === 0 ? 'Any (open)' : data.allowedDomains.join(', ')
+            }
+          />
+        </ReviewCard>
+      </div>
 
       <div className="flex items-start gap-3 rounded-2xl border border-voice/30 bg-voice/5 p-5">
         <Sparkles className="mt-0.5 size-4 shrink-0 text-voice" aria-hidden />
         <p className="text-sm leading-relaxed text-foreground">
           <span className="font-medium">Heads up: </span>
-          This agent is created in <span className="font-medium">your</span> ElevenLabs
-          account. Voice usage (characters spoken) counts against{' '}
+          This agent is created in <span className="font-medium">your</span> ElevenLabs account.
+          Voice usage (characters spoken) counts against{' '}
           <span className="font-medium">your</span> ElevenLabs subscription. VoiceFlow charges
           only a flat platform fee — see{' '}
           <Link
@@ -1061,51 +1430,202 @@ function StepReview({ data }: { data: WizardData }) {
 }
 
 // ---------------------------------------------------------------------------
+// Submitting overlay
+// ---------------------------------------------------------------------------
+
+function SubmittingOverlay({ stage }: { stage: 'provisioning' | 'saving' | 'done' }) {
+  const steps: { key: typeof stage; label: string }[] = [
+    { key: 'provisioning', label: 'Provisioning in ElevenLabs' },
+    { key: 'saving', label: 'Saving to your dashboard' },
+    { key: 'done', label: 'Ready to go' },
+  ];
+  const stageIdx = steps.findIndex((s) => s.key === stage);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 z-50 grid place-items-center bg-background/70 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ scale: 0.96, y: 8, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        transition={{ duration: 0.18, ease: 'easeOut' }}
+        className="w-[min(420px,calc(100vw-2rem))] rounded-2xl border border-border bg-card p-7 shadow-xl"
+      >
+        <div className="flex items-center gap-3">
+          <div className="grid size-10 place-items-center rounded-full bg-voice/10 text-voice ring-1 ring-voice/20">
+            {stage === 'done' ? (
+              <Check className="size-5" />
+            ) : (
+              <Loader2 className="size-5 animate-spin" />
+            )}
+          </div>
+          <div>
+            <p className="font-serif text-xl tracking-tight">
+              {stage === 'done' ? 'Agent created' : 'Creating your agent'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {stage === 'done'
+                ? 'Redirecting to your new agent…'
+                : 'Hang tight — this takes a few seconds.'}
+            </p>
+          </div>
+        </div>
+        <ol className="mt-5 space-y-2.5">
+          {steps.map((s, i) => {
+            const isDone = stageIdx > i || stage === 'done';
+            const isCurrent = stageIdx === i && stage !== 'done';
+            return (
+              <li
+                key={s.key}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-2 py-1 text-sm',
+                  isCurrent && 'bg-voice/5',
+                )}
+              >
+                <span
+                  className={cn(
+                    'grid size-5 place-items-center rounded-full',
+                    isDone && 'bg-voice text-voice-foreground',
+                    isCurrent && 'bg-voice/20 text-voice',
+                    !isDone && !isCurrent && 'bg-muted text-muted-foreground/60',
+                  )}
+                >
+                  {isDone ? (
+                    <Check className="size-3" />
+                  ) : isCurrent ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <span className="text-[10px]">{i + 1}</span>
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    isCurrent && 'text-foreground',
+                    isDone && 'text-foreground/80',
+                    !isDone && !isCurrent && 'text-muted-foreground/70',
+                  )}
+                >
+                  {s.label}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tiny helpers
 // ---------------------------------------------------------------------------
 
-function Heading({ title, hint }: { title: string; hint?: string }) {
+function Heading({
+  eyebrow,
+  title,
+  hint,
+}: {
+  eyebrow?: string;
+  title: string;
+  hint?: string;
+}) {
   return (
-    <div className="space-y-1">
-      <h2 className="font-serif text-3xl tracking-tight text-foreground">{title}</h2>
-      {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
+    <div className="space-y-1.5">
+      {eyebrow ? (
+        <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-voice">{eyebrow}</p>
+      ) : null}
+      <h2 className="font-serif text-2xl tracking-tight text-foreground sm:text-3xl">{title}</h2>
+      {hint ? (
+        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{hint}</p>
+      ) : null}
     </div>
   );
 }
 
-function Field({
+function SectionCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-border/70 bg-card/40 p-5">{children}</div>
+  );
+}
+
+function FieldGroup({
+  label,
+  hint,
+  required,
+  trailing,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  required?: boolean;
+  trailing?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-end justify-between gap-2">
+        <Label className="text-sm">
+          {label}
+          {required ? <span className="ml-0.5 text-voice">*</span> : null}
+        </Label>
+        {trailing}
+      </div>
+      {children}
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+    </div>
+  );
+}
+
+function ReviewCard({
+  icon: Icon,
+  title,
+  children,
+  className,
+}: {
+  icon: typeof Wand;
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn('rounded-2xl border border-border/70 bg-card/50 p-5', className)}>
+      <div className="mb-3 flex items-center gap-2">
+        <div className="grid size-7 place-items-center rounded-md bg-voice/10 text-voice ring-1 ring-voice/20">
+          <Icon className="size-3.5" />
+        </div>
+        <p className="text-sm font-medium">{title}</p>
+      </div>
+      <dl className="space-y-2">{children}</dl>
+    </div>
+  );
+}
+
+function ReviewRow({
   label,
   value,
   mono = false,
-  full = false,
 }: {
   label: string;
   value: string;
   mono?: boolean;
-  full?: boolean;
 }) {
   return (
-    <div className={cn(full && 'sm:col-span-2')}>
-      <dt className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </dt>
-      <dd className={cn('mt-1 text-sm text-foreground', mono && 'font-mono text-xs')}>
+    <div className="grid grid-cols-[100px_1fr] gap-3 text-sm">
+      <dt className="text-xs uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dd
+        className={cn(
+          'min-w-0 break-words text-foreground',
+          mono && 'font-mono text-xs',
+        )}
+      >
         {value || '—'}
       </dd>
     </div>
   );
-}
-
-function stepTitle(step: number): string {
-  return [
-    'Template',
-    'Business',
-    'Voice & personality',
-    'Knowledge',
-    'System prompt',
-    'Channels',
-    'Review',
-  ][step - 1];
 }
 
 function validateStep(step: number, data: WizardData): boolean {
@@ -1147,14 +1667,13 @@ function makeSlug(name: string): string {
 
 function renderHoursText(h: BusinessHours): string {
   const parts: string[] = [];
-  for (const { key, label } of DAYS) {
+  for (const { key, short } of DAYS) {
     const d = h[key];
     if (d.closed) {
-      parts.push(`${label}: Closed`);
+      parts.push(`${short}: Closed`);
     } else if (d.open && d.close) {
-      parts.push(`${label}: ${d.open}–${d.close}`);
+      parts.push(`${short}: ${d.open}–${d.close}`);
     }
   }
   return parts.join(', ');
 }
-
