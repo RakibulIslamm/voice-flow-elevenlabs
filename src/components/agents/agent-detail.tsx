@@ -7,20 +7,28 @@ import { toast } from 'sonner';
 import {
   AlertTriangle,
   ArrowLeft,
+  AudioLines,
   Bot,
   Check,
   CircleDot,
+  Clock,
   Code2,
   ExternalLink,
   Eye,
+  Gauge,
   Globe2,
   Inbox,
+  Link2,
   Loader2,
+  MapPin,
+  Mic,
   Pencil,
+  Phone,
   PhoneCall,
   Play,
   RefreshCw,
   ShieldCheck,
+  Sparkle,
   Sparkles,
   Trash2,
   Workflow,
@@ -81,6 +89,10 @@ export type AgentDetailData = {
   name: string;
   template: AgentTemplate;
   businessName: string;
+  businessAddress: string;
+  businessPhone: string;
+  businessWebsite: string;
+  businessTimezone: string;
   businessHours: Record<string, { open?: string; close?: string; closed: boolean }> | null;
   faq: AgentFaqEntry[];
   voiceId: string;
@@ -138,16 +150,18 @@ export function AgentDetail({
       ) : null}
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-6">
-        <TabsList className="flex h-auto w-full flex-wrap gap-1 bg-card/40 p-1">
-          <TabTrigger value="overview" label="Overview" />
-          <TabTrigger value="test" label="Test" />
-          <TabTrigger value="embed" label="Embed" />
-          <TabTrigger value="calls" label="Calls" />
-          <TabTrigger value="captures" label="Captures" />
-          <TabTrigger value="settings" label="Settings" />
-          <TabTrigger value="channels" label="Channels" />
-          <TabTrigger value="analytics" label="Analytics" />
-        </TabsList>
+        <div className="-mx-2 overflow-x-auto px-2">
+          <TabsList className="inline-flex h-auto min-w-max gap-1 rounded-xl border border-border/60 bg-card/40 p-1">
+            <TabTrigger value="overview" label="Overview" />
+            <TabTrigger value="test" label="Test" />
+            <TabTrigger value="embed" label="Embed" />
+            <TabTrigger value="calls" label="Calls" />
+            <TabTrigger value="captures" label="Captures" />
+            <TabTrigger value="settings" label="Settings" />
+            <TabTrigger value="channels" label="Channels" />
+            <TabTrigger value="analytics" label="Analytics" />
+          </TabsList>
+        </div>
 
         <TabsContent value="overview" className="space-y-6">
           <OverviewTab
@@ -234,7 +248,7 @@ function Header({
   onRename: () => void;
 }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <Link
         href="/dashboard/agents"
         className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition hover:text-foreground"
@@ -243,38 +257,61 @@ function Header({
         Back to agents
       </Link>
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-[0.22em] text-voice">
-            Agent
-          </p>
-          <div className="flex items-center gap-2">
-            <h1 className="font-serif text-3xl tracking-tight sm:text-4xl">{agent.name}</h1>
-            <button
-              type="button"
-              onClick={onRename}
-              aria-label="Rename agent"
-              className="grid size-8 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              <Pencil className="size-3.5" />
-            </button>
-          </div>
-          {agent.businessName ? (
-            <p className="text-sm text-muted-foreground">{agent.businessName}</p>
-          ) : null}
-          <div className="pt-1">
-            <StatusBadge status={agent.status} elConnected={context.elConnected} />
-          </div>
-        </div>
+      <div className="relative overflow-hidden rounded-3xl border border-border/70 bg-linear-to-br from-card via-card to-voice/5 p-6 sm:p-8">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-24 -top-24 size-64 rounded-full bg-voice/15 blur-3xl"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-32 -left-20 size-72 rounded-full bg-emerald-500/10 blur-3xl"
+        />
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline" size="sm">
-            <Link href={publicUrl} target="_blank" rel="noopener noreferrer">
-              <Sparkles className="size-4" />
-              Quick test
-              <ExternalLink className="size-3.5" />
-            </Link>
-          </Button>
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant="outline"
+                className="border-voice/30 bg-voice/5 text-[10px] font-medium uppercase tracking-wider text-voice"
+              >
+                {agent.template}
+              </Badge>
+              <StatusBadge status={agent.status} elConnected={context.elConnected} />
+              {agent.expressiveMode ? (
+                <Badge
+                  variant="outline"
+                  className="border-emerald-500/30 bg-emerald-500/10 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+                >
+                  <Sparkle className="mr-1 size-3" />
+                  Expressive
+                </Badge>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-2">
+              <h1 className="font-serif text-3xl tracking-tight sm:text-4xl">{agent.name}</h1>
+              <button
+                type="button"
+                onClick={onRename}
+                aria-label="Rename agent"
+                className="grid size-8 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              >
+                <Pencil className="size-3.5" />
+              </button>
+            </div>
+            {agent.businessName ? (
+              <p className="text-sm text-muted-foreground">{agent.businessName}</p>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href={publicUrl} target="_blank" rel="noopener noreferrer">
+                <Sparkles className="size-4" />
+                Quick test
+                <ExternalLink className="size-3.5" />
+              </Link>
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -399,10 +436,26 @@ function OverviewTab({
   return (
     <>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Calls (this month)" value="0" hint="Real data lands Phase 11" />
-        <StatCard label="Avg duration" value="—" hint="Per-call analytics in Phase 13" />
-        <StatCard label="Capture rate" value="—" hint="Booking & lead conversion" />
         <StatCard
+          icon={PhoneCall}
+          label="Calls (this month)"
+          value="0"
+          hint="Real data lands Phase 11"
+        />
+        <StatCard
+          icon={Clock}
+          label="Avg duration"
+          value="—"
+          hint="Per-call analytics in Phase 13"
+        />
+        <StatCard
+          icon={Gauge}
+          label="Capture rate"
+          value="—"
+          hint="Booking & lead conversion"
+        />
+        <StatCard
+          icon={agent.status === 'active' ? Check : AlertTriangle}
           label="Status"
           value={statusLabel(agent.status, context.elConnected)}
           tone={agent.status === 'active' ? 'good' : 'warn'}
@@ -413,38 +466,20 @@ function OverviewTab({
         <ReactivateCard agentId={agent.id} />
       ) : null}
 
+      <AtAGlanceCard agent={agent} />
+
+      <PublicLinkCard publicUrl={publicUrl} />
+
       {context.elConnected ? <ResyncToolsCard agentId={agent.id} /> : null}
 
       {needsAttention && agent.status === 'paused' ? null : null}
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Public URL</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/40 px-3 py-2">
-            <code className="min-w-0 flex-1 truncate font-mono text-xs">{publicUrl}</code>
-            <CopyButton value={publicUrl} />
-            <Button asChild variant="ghost" size="sm" className="h-7 px-2">
-              <Link href={publicUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="size-3.5" />
-                Open
-              </Link>
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Share this link with your audience or paste it into the Embed tab to add a widget to
-            your site.
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-medium">Recent calls</CardTitle>
-          <Badge variant="outline" className="text-[10px]">
-            Phase 11
-          </Badge>
+          <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-xs">
+            <Link href="/dashboard/calls">View all</Link>
+          </Button>
         </CardHeader>
         <CardContent>
           <EmptyState
@@ -458,6 +493,119 @@ function OverviewTab({
   );
 }
 
+function AtAGlanceCard({ agent }: { agent: AgentDetailData }) {
+  const rows: Array<{ icon: typeof Bot; label: string; value: React.ReactNode }> = [
+    {
+      icon: Bot,
+      label: 'Template',
+      value: <span className="capitalize">{agent.template.replace(/-/g, ' ')}</span>,
+    },
+    { icon: Mic, label: 'Voice', value: <code className="font-mono text-[11px]">{agent.voiceId}</code> },
+    {
+      icon: AudioLines,
+      label: 'TTS',
+      value: agent.expressiveMode ? (
+        <span className="inline-flex items-center gap-1">
+          Expressive
+          <Sparkle className="size-3 text-voice" />
+        </span>
+      ) : (
+        'Standard'
+      ),
+    },
+    { icon: Clock, label: 'Timezone', value: agent.businessTimezone },
+    ...(agent.businessAddress
+      ? [{ icon: MapPin as typeof Bot, label: 'Address', value: agent.businessAddress }]
+      : []),
+    ...(agent.businessPhone
+      ? [{ icon: Phone as typeof Bot, label: 'Phone', value: agent.businessPhone }]
+      : []),
+    ...(agent.businessWebsite
+      ? [
+          {
+            icon: Globe2 as typeof Bot,
+            label: 'Website',
+            value: (
+              <Link
+                href={agent.businessWebsite}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-voice hover:underline"
+              >
+                <span className="truncate">{agent.businessWebsite}</span>
+                <ExternalLink className="size-3 shrink-0" />
+              </Link>
+            ),
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-medium">At a glance</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {rows.map((row) => {
+            const Icon = row.icon;
+            return (
+              <div
+                key={row.label}
+                className="flex items-start gap-3 rounded-xl border border-border/60 bg-card/30 px-3 py-2.5"
+              >
+                <div className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-muted/60 text-muted-foreground">
+                  <Icon className="size-3.5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <dt className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    {row.label}
+                  </dt>
+                  <dd className="mt-0.5 truncate text-sm text-foreground">{row.value}</dd>
+                </div>
+              </div>
+            );
+          })}
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PublicLinkCard({ publicUrl }: { publicUrl: string }) {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <CardTitle className="text-sm font-medium">Public test URL</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Share to let anyone call this agent in their browser. Paste into the Embed tab to
+              add a widget on your own site.
+            </p>
+          </div>
+          <div className="hidden sm:grid size-9 place-items-center rounded-full bg-voice/10 text-voice ring-1 ring-voice/20">
+            <Link2 className="size-4" />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-muted/40 px-3 py-2">
+          <code className="min-w-0 flex-1 truncate font-mono text-xs">{publicUrl}</code>
+          <CopyButton value={publicUrl} />
+          <Button asChild variant="default" size="sm" className="h-8 px-3">
+            <Link href={publicUrl} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="size-3.5" />
+              Open
+            </Link>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function statusLabel(status: AgentStatus, elConnected: boolean): string {
   if (status === 'error') return 'Error';
   if (status === 'paused' && !elConnected) return 'Needs attention';
@@ -466,24 +614,40 @@ function statusLabel(status: AgentStatus, elConnected: boolean): string {
 }
 
 function StatCard({
+  icon,
   label,
   value,
   hint,
   tone = 'neutral',
 }: {
+  icon?: typeof Bot;
   label: string;
   value: string;
   hint?: string;
   tone?: 'neutral' | 'good' | 'warn';
 }) {
+  const Icon = icon;
+  const toneAccent =
+    tone === 'good'
+      ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/20 dark:text-emerald-400'
+      : tone === 'warn'
+        ? 'bg-amber-500/10 text-amber-600 ring-amber-500/20 dark:text-amber-400'
+        : 'bg-muted/60 text-muted-foreground ring-border/60';
   return (
-    <div className="rounded-2xl border border-border/70 bg-card/50 p-4">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
+    <div className="group relative overflow-hidden rounded-2xl border border-border/70 bg-card/50 p-4 transition hover:border-voice/40 hover:bg-card/70">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          {label}
+        </p>
+        {Icon ? (
+          <div className={cn('grid size-7 place-items-center rounded-md ring-1', toneAccent)}>
+            <Icon className="size-3.5" />
+          </div>
+        ) : null}
+      </div>
       <p
         className={cn(
-          'mt-2 font-serif text-2xl tracking-tight',
+          'mt-3 font-serif text-2xl tracking-tight',
           tone === 'good' && 'text-emerald-600 dark:text-emerald-400',
           tone === 'warn' && 'text-amber-600 dark:text-amber-400',
         )}
@@ -530,36 +694,66 @@ function ResyncToolsCard({ agentId }: { agentId: string }) {
   }
 
   return (
-    <div className="rounded-2xl border border-border/70 bg-card/40 p-5">
-      <div className="flex items-start gap-3">
-        <Workflow className="mt-0.5 size-4 shrink-0 text-voice" />
-        <div className="flex-1">
-          <p className="text-sm font-medium text-foreground">ElevenLabs sync</p>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            Push the latest tool catalog and the date-grounded system prompt to ElevenLabs. Run
-            both after any major upgrade — existing agents won&apos;t pick up changes automatically.
-          </p>
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <CardTitle className="text-sm font-medium">ElevenLabs sync</CardTitle>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Push the latest tool catalog and the date-grounded system prompt to ElevenLabs. Run
+              both after any major upgrade — existing agents won&apos;t pick up changes automatically.
+            </p>
+          </div>
+          <div className="hidden sm:grid size-9 place-items-center rounded-full bg-voice/10 text-voice ring-1 ring-voice/20">
+            <Workflow className="size-4" />
+          </div>
         </div>
-      </div>
-      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-        <Button onClick={onResyncSettings} disabled={settingsPending} variant="outline">
-          {settingsPending ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <RefreshCw className="size-4" />
-          )}
-          Re-sync settings
-        </Button>
-        <Button onClick={onResyncTools} disabled={toolsPending} variant="outline">
-          {toolsPending ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <RefreshCw className="size-4" />
-          )}
-          Re-sync tools
-        </Button>
-      </div>
-    </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={onResyncSettings}
+            disabled={settingsPending}
+            className="group flex items-center gap-3 rounded-xl border border-border/70 bg-card/30 p-3 text-left transition hover:border-voice/40 hover:bg-card/60 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted/60 text-muted-foreground transition group-hover:bg-voice/10 group-hover:text-voice">
+              {settingsPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Sparkles className="size-4" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">Re-sync settings</p>
+              <p className="truncate text-xs text-muted-foreground">
+                Prompt, greeting, timezone, expressive mode
+              </p>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={onResyncTools}
+            disabled={toolsPending}
+            className="group flex items-center gap-3 rounded-xl border border-border/70 bg-card/30 p-3 text-left transition hover:border-voice/40 hover:bg-card/60 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted/60 text-muted-foreground transition group-hover:bg-voice/10 group-hover:text-voice">
+              {toolsPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="size-4" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">Re-sync tools</p>
+              <p className="truncate text-xs text-muted-foreground">
+                Push the latest 12-tool catalog
+              </p>
+            </div>
+          </button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -584,20 +778,24 @@ function ReactivateCard({ agentId }: { agentId: string }) {
   }
 
   return (
-    <div className="flex flex-col items-start justify-between gap-3 rounded-2xl border border-voice/30 bg-voice/5 p-5 sm:flex-row sm:items-center">
-      <div className="flex items-start gap-3">
-        <Sparkles className="mt-0.5 size-4 shrink-0 text-voice" />
-        <div>
-          <p className="text-sm font-medium text-foreground">This agent is paused</p>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            Re-activate to start handling calls again.
-          </p>
+    <div className="relative overflow-hidden rounded-2xl border border-voice/30 bg-linear-to-br from-voice/10 via-voice/5 to-transparent p-5 sm:p-6">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+        <div className="flex items-start gap-3">
+          <div className="grid size-9 shrink-0 place-items-center rounded-full bg-voice/15 text-voice ring-1 ring-voice/30">
+            <Sparkles className="size-4" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-foreground">This agent is paused</p>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Re-activate to start handling calls again.
+            </p>
+          </div>
         </div>
+        <Button onClick={onClick} disabled={pending}>
+          {pending ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+          Re-activate
+        </Button>
       </div>
-      <Button onClick={onClick} disabled={pending}>
-        {pending ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-        Re-activate
-      </Button>
     </div>
   );
 }

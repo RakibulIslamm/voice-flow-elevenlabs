@@ -18,6 +18,7 @@ export function PageHeader({
   actions,
   align = 'center',
   className,
+  showWave
 }: {
   eyebrow?: string;
   title: string;
@@ -25,6 +26,7 @@ export function PageHeader({
   actions?: ReactNode;
   align?: 'center' | 'start';
   className?: string;
+  showWave?: boolean;
 }) {
   if (align === 'start') {
     return (
@@ -49,7 +51,7 @@ export function PageHeader({
               {description}
             </p>
           ) : null}
-          <Waveform className="mt-3 h-5 w-40" height={20} bars={36} />
+          {showWave && <Waveform className="mt-3 h-5 w-40" height={20} bars={36} />}
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>
@@ -73,7 +75,7 @@ export function PageHeader({
           {description}
         </p>
       ) : null}
-      <Waveform className="mt-4 h-5 w-48 sm:w-64" height={20} bars={48} />
+      {showWave && <Waveform className="mt-4 h-5 w-48 sm:w-64" height={20} bars={48} />}
       {actions ? <div className="mt-2 flex flex-wrap items-center justify-center gap-2">{actions}</div> : null}
     </div>
   );

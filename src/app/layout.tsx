@@ -54,7 +54,6 @@ export default function RootLayout({
           <ErrorTelemetry />
           <Toaster />
         </ThemeProvider>
-        <script src="https://voice-flow-betaa.vercel.app/widget.js" data-agent-slug="test-dental-1c3s" async></script>
       </body>
     </html>
   );

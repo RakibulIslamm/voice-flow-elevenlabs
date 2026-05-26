@@ -18,6 +18,7 @@ export default async function DashboardOverviewPage() {
         eyebrow="Overview"
         title={`Welcome back, ${displayName}.`}
         description="Your AI receptionists, recent conversations, and pipeline at a glance. Live data lights up as soon as your first agent goes online."
+        showWave={true}
       />
 
       <section aria-label="Key metrics" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">

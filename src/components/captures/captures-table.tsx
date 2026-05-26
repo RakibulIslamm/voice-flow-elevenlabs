@@ -65,7 +65,7 @@ export function CapturesTable({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs value={activeType} onValueChange={onTabChange}>
-          <TabsList className="flex h-auto flex-wrap gap-1 bg-card/40 p-1">
+          <TabsList className="inline-flex h-auto min-w-max gap-1 rounded-xl border border-border/60 bg-card/40 p-1">
             {TABS.map((t) => (
               <TabsTrigger
                 key={t.key}

@@ -25,6 +25,7 @@ export default async function IntegrationsPage() {
         eyebrow="Connections"
         title="Integrations"
         description="Bring your own keys. Credentials are encrypted at rest and only decrypted at the call site. Click any integration to set it up or manage it."
+        showWave={true}
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
