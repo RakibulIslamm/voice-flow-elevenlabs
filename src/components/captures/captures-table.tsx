@@ -15,11 +15,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import type { CaptureType } from '@/lib/db/models/capture';
+import type { CaptureStatus, CaptureType } from '@/lib/db/models/capture';
 
 export type CaptureListItem = {
   id: string;
   type: CaptureType;
+  status: CaptureStatus;
+  code: string | null;
   data: unknown;
   callId: string;
   agentName: string;
@@ -90,6 +92,8 @@ export function CapturesTable({
           <TableHeader>
             <TableRow className="bg-card/40 hover:bg-card/40">
               <TableHead className="font-medium">Type</TableHead>
+              <TableHead className="font-medium">Code</TableHead>
+              <TableHead className="font-medium">Status</TableHead>
               <TableHead className="font-medium">Agent</TableHead>
               <TableHead className="font-medium">Caller</TableHead>
               <TableHead className="font-medium">Contact</TableHead>
@@ -100,7 +104,7 @@ export function CapturesTable({
             {items.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={7}
                   className="py-10 text-center text-sm text-muted-foreground"
                 >
                   No captures match this filter.
@@ -123,6 +127,18 @@ export function CapturesTable({
                       <Badge variant="outline" className="text-[10px]">
                         {TYPE_LABEL[c.type]}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {c.code ? (
+                        <code className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px]">
+                          {c.code}
+                        </code>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <CaptureStatusBadge status={c.status} />
                     </TableCell>
                     <TableCell>
                       <Link
@@ -149,6 +165,29 @@ export function CapturesTable({
         </Table>
       </div>
     </div>
+  );
+}
+
+export function CaptureStatusBadge({ status }: { status: CaptureStatus }) {
+  const map: Record<CaptureStatus, { label: string; className: string }> = {
+    confirmed: {
+      label: 'Confirmed',
+      className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+    },
+    cancelled: {
+      label: 'Cancelled',
+      className: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300',
+    },
+    rescheduled: {
+      label: 'Rescheduled',
+      className: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    },
+  };
+  const m = map[status] ?? map.confirmed;
+  return (
+    <Badge variant="outline" className={`text-[10px] ${m.className}`}>
+      {m.label}
+    </Badge>
   );
 }
 

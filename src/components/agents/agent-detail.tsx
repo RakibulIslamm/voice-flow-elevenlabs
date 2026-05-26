@@ -55,6 +55,7 @@ import { EmptyState } from '@/components/states/empty-state';
 import {
   deleteAgent,
   reactivateAgent,
+  resyncAgentSettings,
   resyncAgentTools,
   updateAgent,
 } from '@/server/actions/agents';
@@ -494,10 +495,11 @@ function StatCard({
 }
 
 function ResyncToolsCard({ agentId }: { agentId: string }) {
-  const [pending, startTransition] = useTransition();
+  const [toolsPending, startToolsTransition] = useTransition();
+  const [settingsPending, startSettingsTransition] = useTransition();
 
-  function onClick() {
-    startTransition(async () => {
+  function onResyncTools() {
+    startToolsTransition(async () => {
       const result = await resyncAgentTools({ agentId });
       if (result.ok) {
         toast.success(`Re-synced ${result.data.toolCount} tools to ElevenLabs.`);
@@ -511,26 +513,51 @@ function ResyncToolsCard({ agentId }: { agentId: string }) {
     });
   }
 
+  function onResyncSettings() {
+    startSettingsTransition(async () => {
+      const result = await resyncAgentSettings({ agentId });
+      if (result.ok) {
+        toast.success('Re-synced system prompt + timezone to ElevenLabs.');
+      } else {
+        toast.error(result.error.message);
+        void reportClientError({
+          message: `resyncAgentSettings: ${result.error.code}`,
+          name: 'ResyncAgentSettingsError',
+        });
+      }
+    });
+  }
+
   return (
-    <div className="flex flex-col items-start justify-between gap-3 rounded-2xl border border-border/70 bg-card/40 p-5 sm:flex-row sm:items-center">
+    <div className="rounded-2xl border border-border/70 bg-card/40 p-5">
       <div className="flex items-start gap-3">
         <Workflow className="mt-0.5 size-4 shrink-0 text-voice" />
-        <div>
-          <p className="text-sm font-medium text-foreground">Tool webhooks</p>
+        <div className="flex-1">
+          <p className="text-sm font-medium text-foreground">ElevenLabs sync</p>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            Re-push this agent&apos;s tool configuration to ElevenLabs. Use if tool calls fail
-            with &ldquo;trouble checking availability&rdquo; — the URLs may be out of date.
+            Push the latest tool catalog and the date-grounded system prompt to ElevenLabs. Run
+            both after any major upgrade — existing agents won&apos;t pick up changes automatically.
           </p>
         </div>
       </div>
-      <Button onClick={onClick} disabled={pending} variant="outline">
-        {pending ? (
-          <Loader2 className="size-4 animate-spin" />
-        ) : (
-          <RefreshCw className="size-4" />
-        )}
-        Re-sync tools
-      </Button>
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+        <Button onClick={onResyncSettings} disabled={settingsPending} variant="outline">
+          {settingsPending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <RefreshCw className="size-4" />
+          )}
+          Re-sync settings
+        </Button>
+        <Button onClick={onResyncTools} disabled={toolsPending} variant="outline">
+          {toolsPending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <RefreshCw className="size-4" />
+          )}
+          Re-sync tools
+        </Button>
+      </div>
     </div>
   );
 }

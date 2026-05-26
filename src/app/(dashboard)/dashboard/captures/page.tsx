@@ -41,12 +41,12 @@ export default async function CapturesPage({
 
   type LeanCapture = Pick<
     CaptureDoc,
-    '_id' | 'callId' | 'agentId' | 'type' | 'data' | 'createdAt'
+    '_id' | 'callId' | 'agentId' | 'type' | 'status' | 'code' | 'data' | 'createdAt'
   >;
   const captures = await Capture.find(filter)
     .sort({ createdAt: -1 })
     .limit(100)
-    .select('_id callId agentId type data createdAt')
+    .select('_id callId agentId type status code data createdAt')
     .lean<LeanCapture[]>();
 
   const agentIds = Array.from(new Set(captures.map((c) => c.agentId.toString())));
@@ -68,6 +68,8 @@ export default async function CapturesPage({
     return {
       id: c._id.toString(),
       type: c.type as CaptureType,
+      status: c.status ?? 'confirmed',
+      code: c.code ?? null,
       data: c.data,
       callId: c.callId.toString(),
       agentName: ag?.name ?? 'Unknown agent',

@@ -14,7 +14,14 @@ export type VoiceFlowToolName =
   | 'book_appointment'
   | 'book_reservation'
   | 'log_lead'
-  | 'transfer_to_human';
+  | 'transfer_to_human'
+  | 'get_current_datetime'
+  | 'get_business_hours'
+  | 'get_business_info'
+  | 'lookup_booking'
+  | 'cancel_booking'
+  | 'reschedule_booking'
+  | 'send_confirmation';
 
 /**
  * Minimal JSON-schema dialect ElevenLabs accepts for tool parameters.
@@ -59,14 +66,49 @@ export type TemplateKey = 'dental' | 'restaurant' | 'lead-qualifier' | 'custom';
  * — if you grant `book_appointment` here, the prompt should mention it.
  */
 const TEMPLATE_TOOL_NAMES: Record<TemplateKey, readonly VoiceFlowToolName[]> = {
-  dental: ['check_availability', 'book_appointment', 'transfer_to_human'],
-  restaurant: ['check_availability', 'book_reservation', 'transfer_to_human'],
-  'lead-qualifier': ['log_lead', 'transfer_to_human'],
+  dental: [
+    'check_availability',
+    'book_appointment',
+    'lookup_booking',
+    'cancel_booking',
+    'reschedule_booking',
+    'get_business_hours',
+    'get_business_info',
+    'get_current_datetime',
+    'send_confirmation',
+    'transfer_to_human',
+  ],
+  restaurant: [
+    'check_availability',
+    'book_reservation',
+    'lookup_booking',
+    'cancel_booking',
+    'reschedule_booking',
+    'get_business_hours',
+    'get_business_info',
+    'get_current_datetime',
+    'send_confirmation',
+    'transfer_to_human',
+  ],
+  'lead-qualifier': [
+    'log_lead',
+    'get_business_info',
+    'get_current_datetime',
+    'send_confirmation',
+    'transfer_to_human',
+  ],
   custom: [
     'check_availability',
     'book_appointment',
     'book_reservation',
     'log_lead',
+    'lookup_booking',
+    'cancel_booking',
+    'reschedule_booking',
+    'get_business_hours',
+    'get_business_info',
+    'get_current_datetime',
+    'send_confirmation',
     'transfer_to_human',
   ],
 };
@@ -218,6 +260,149 @@ const TOOL_DEFINITIONS: Record<VoiceFlowToolName, () => VoiceFlowTool> = {
     },
     webhook: { url: toolUrl('transfer_to_human'), method: 'POST', headers: defaultHeaders() },
   }),
+
+  // --- New tools below — see PHASE 11.5 plan -----------------------------
+
+  get_current_datetime: () => ({
+    name: 'get_current_datetime',
+    description:
+      "Returns the business's current date, time, and day of the week. Use this if you are unsure what today's date is or how to resolve relative phrases like \"tomorrow\" or \"next Tuesday\".",
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    webhook: { url: toolUrl('get_current_datetime'), method: 'POST', headers: defaultHeaders() },
+  }),
+
+  get_business_hours: () => ({
+    name: 'get_business_hours',
+    description:
+      "Returns the business's configured operating hours. Use this BEFORE telling a caller whether the business is open on a given day — never guess.",
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    webhook: { url: toolUrl('get_business_hours'), method: 'POST', headers: defaultHeaders() },
+  }),
+
+  get_business_info: () => ({
+    name: 'get_business_info',
+    description:
+      "Returns the business's name, address, phone number, and website. Use this when the caller asks where you're located, how to reach you, or for directions.",
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    webhook: { url: toolUrl('get_business_info'), method: 'POST', headers: defaultHeaders() },
+  }),
+
+  lookup_booking: () => ({
+    name: 'lookup_booking',
+    description:
+      "Find an existing reservation or appointment. Prefer the confirmation code if the caller has it; fall back to caller name + phone. Returns the booking details (or that none was found).",
+    parameters: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: "Confirmation code the caller was given (e.g. \"R4K9-2X\"). Optional.",
+        },
+        caller_name: {
+          type: 'string',
+          description: 'Name the booking is under. Used when no code is provided.',
+        },
+        phone: {
+          type: 'string',
+          description: 'Phone number on the booking. Used when no code is provided.',
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    webhook: { url: toolUrl('lookup_booking'), method: 'POST', headers: defaultHeaders() },
+  }),
+
+  cancel_booking: () => ({
+    name: 'cancel_booking',
+    description:
+      'Cancel an existing reservation or appointment after the caller has confirmed they want to cancel. Requires the confirmation code.',
+    parameters: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: "Confirmation code for the booking to cancel (e.g. \"R4K9-2X\").",
+        },
+        reason: {
+          type: 'string',
+          description: "Short reason the caller gave for cancelling (e.g. \"scheduling conflict\"). Optional.",
+        },
+      },
+      required: ['code'],
+      additionalProperties: false,
+    },
+    webhook: { url: toolUrl('cancel_booking'), method: 'POST', headers: defaultHeaders() },
+  }),
+
+  reschedule_booking: () => ({
+    name: 'reschedule_booking',
+    description:
+      "Change the date or time of an existing reservation or appointment. Requires the confirmation code and the new date/time. Confirm the new slot with `check_availability` first.",
+    parameters: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: 'Confirmation code for the booking to reschedule.',
+        },
+        new_date: {
+          type: 'string',
+          description: 'New date in YYYY-MM-DD format.',
+          format: 'date',
+        },
+        new_time: {
+          type: 'string',
+          description: 'New time in HH:MM 24-hour format.',
+        },
+      },
+      required: ['code', 'new_date', 'new_time'],
+      additionalProperties: false,
+    },
+    webhook: { url: toolUrl('reschedule_booking'), method: 'POST', headers: defaultHeaders() },
+  }),
+
+  send_confirmation: () => ({
+    name: 'send_confirmation',
+    description:
+      "Sends a confirmation email to the caller with the booking or lead details. Only use AFTER you've collected a valid email address. Tell the caller it's been sent.",
+    parameters: {
+      type: 'object',
+      properties: {
+        email: {
+          type: 'string',
+          description: 'Email address to send the confirmation to.',
+          format: 'email',
+        },
+        code: {
+          type: 'string',
+          description: 'Confirmation code for the booking, if applicable. Optional.',
+        },
+        summary: {
+          type: 'string',
+          description: 'One-sentence summary of what is being confirmed (e.g. "Reservation for 4 on 2026-05-26 at 19:00").',
+        },
+      },
+      required: ['email', 'summary'],
+      additionalProperties: false,
+    },
+    webhook: { url: toolUrl('send_confirmation'), method: 'POST', headers: defaultHeaders() },
+  }),
 };
 
 /**
@@ -250,5 +435,33 @@ export const TOOL_CATALOG: Record<
   transfer_to_human: {
     name: 'transfer_to_human',
     description: 'Escalate to a human via email.',
+  },
+  get_current_datetime: {
+    name: 'get_current_datetime',
+    description: "Return the business's current date/time and day of week.",
+  },
+  get_business_hours: {
+    name: 'get_business_hours',
+    description: "Return the configured business hours.",
+  },
+  get_business_info: {
+    name: 'get_business_info',
+    description: 'Return business name, address, phone, and website.',
+  },
+  lookup_booking: {
+    name: 'lookup_booking',
+    description: 'Find an existing booking by code or name+phone.',
+  },
+  cancel_booking: {
+    name: 'cancel_booking',
+    description: 'Cancel an existing booking by confirmation code.',
+  },
+  reschedule_booking: {
+    name: 'reschedule_booking',
+    description: 'Change date/time of an existing booking.',
+  },
+  send_confirmation: {
+    name: 'send_confirmation',
+    description: 'Email a confirmation to the caller.',
   },
 };

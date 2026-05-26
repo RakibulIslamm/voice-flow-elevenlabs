@@ -15,7 +15,9 @@ export type ToolNotificationKind =
   | 'appointment'
   | 'reservation'
   | 'lead'
-  | 'transfer';
+  | 'transfer'
+  | 'cancellation'
+  | 'reschedule';
 
 export type ToolNotificationProps = {
   appUrl: string;
@@ -50,6 +52,16 @@ const COPY: Record<
     eyebrow: 'Transfer requested',
     title: (biz) => `${biz} — caller requested a human`,
     cta: 'View call & respond',
+  },
+  cancellation: {
+    eyebrow: 'Booking cancelled',
+    title: (biz) => `${biz} — caller cancelled a booking`,
+    cta: 'View call & details',
+  },
+  reschedule: {
+    eyebrow: 'Booking rescheduled',
+    title: (biz) => `${biz} — caller rescheduled a booking`,
+    cta: 'View call & new time',
   },
 };
 

@@ -1,5 +1,6 @@
 import 'server-only';
 import type { Template, BusinessInfo } from './types';
+import { buildSharedPromptHeader } from './prompt-header';
 
 /**
  * "Custom" template — the escape hatch. Exposes every tool and provides
@@ -15,6 +16,7 @@ const defaultFAQ = [
 
 function buildSystemPrompt(info: BusinessInfo): string {
   return [
+    buildSharedPromptHeader(),
     `You are an AI voice agent for ${info.name}.`,
     `This is a "custom" template — the operator may replace this prompt entirely. The text below is the safe default.`,
     ``,
@@ -35,6 +37,9 @@ function buildSystemPrompt(info: BusinessInfo): string {
     `- book_appointment: schedule a 1:1.`,
     `- book_reservation: book a restaurant table.`,
     `- log_lead: capture sales lead details.`,
+    `- lookup_booking, cancel_booking, reschedule_booking: manage existing bookings by confirmation code.`,
+    `- get_business_hours, get_business_info, get_current_datetime: ground answers in real data.`,
+    `- send_confirmation: email a confirmation to the caller after a successful booking.`,
     `- transfer_to_human: escalate to a teammate via email.`,
     ``,
     info.hours ? `## Hours\n${info.hours}` : '',
@@ -59,6 +64,13 @@ export const customTemplate: Template = {
     'book_appointment',
     'book_reservation',
     'log_lead',
+    'lookup_booking',
+    'cancel_booking',
+    'reschedule_booking',
+    'get_business_hours',
+    'get_business_info',
+    'get_current_datetime',
+    'send_confirmation',
     'transfer_to_human',
   ],
   buildSystemPrompt,

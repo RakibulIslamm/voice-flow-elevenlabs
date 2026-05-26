@@ -23,8 +23,8 @@ export type SendEmailInput = {
   to: string | string[];
   subject: string;
   /** Pre-rendered HTML. Use react-email's `render()` to produce. */
-  html: string;
-  /** Optional plain-text fallback. Resend recommends including one. */
+  html?: string;
+  /** Plain-text body. Required when `html` is omitted; recommended otherwise. */
   text?: string;
   /** Optional Reply-To. Defaults to `RESEND_FROM_EMAIL`. */
   replyTo?: string;
@@ -44,13 +44,16 @@ export async function sendEmail(
   if (!env.RESEND_FROM_EMAIL) {
     return { ok: false, error: 'RESEND_FROM_EMAIL not configured' };
   }
+  if (!input.html && !input.text) {
+    return { ok: false, error: 'Either html or text body must be provided' };
+  }
   try {
     const client = getClient();
     const res = await client.emails.send({
       from: env.RESEND_FROM_EMAIL,
       to: input.to,
       subject: input.subject,
-      html: input.html,
+      html: input.html ?? wrapTextAsHtml(input.text ?? ''),
       text: input.text,
       replyTo: input.replyTo,
       tags: input.tags,
@@ -68,4 +71,12 @@ export async function sendEmail(
     void logError(e, { scope: 'sendEmail', subject: input.subject });
     return { ok: false, error: e instanceof Error ? e.message : 'unknown' };
   }
+}
+
+function wrapTextAsHtml(text: string): string {
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return `<pre style="font-family:ui-sans-serif,system-ui,sans-serif;white-space:pre-wrap;font-size:14px;line-height:1.5;">${escaped}</pre>`;
 }

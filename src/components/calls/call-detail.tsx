@@ -23,7 +23,8 @@ import { EmptyState } from '@/components/states/empty-state';
 import { StatusBadge } from './calls-table';
 import { resummarizeCall } from '@/server/actions/calls';
 import type { CallChannel, CallStatus } from '@/lib/db/models/call';
-import type { CaptureType } from '@/lib/db/models/capture';
+import type { CaptureStatus, CaptureType } from '@/lib/db/models/capture';
+import { CaptureStatusBadge } from '@/components/captures/captures-table';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,6 +65,8 @@ export type CallDetailData = {
 export type CallCaptureItem = {
   id: string;
   type: CaptureType;
+  status: CaptureStatus;
+  code: string | null;
   data: unknown;
   createdAt: string;
 };
@@ -433,10 +436,18 @@ function CapturesCard({ captures }: { captures: CallCaptureItem[] }) {
               key={c.id}
               className="rounded-xl border border-border/60 bg-card/40 p-3"
             >
-              <div className="mb-2 flex items-center justify-between">
-                <Badge variant="outline" className="text-[10px]">
-                  {TYPE_LABEL[c.type]}
-                </Badge>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[10px]">
+                    {TYPE_LABEL[c.type]}
+                  </Badge>
+                  <CaptureStatusBadge status={c.status} />
+                  {c.code ? (
+                    <code className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px]">
+                      {c.code}
+                    </code>
+                  ) : null}
+                </div>
                 <span className="text-[11px] text-muted-foreground">
                   {formatTimeShort(c.createdAt)}
                 </span>

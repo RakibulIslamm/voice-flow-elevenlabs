@@ -35,6 +35,12 @@ export type AgentConfig = {
    * now.
    */
   toolIds?: string[];
+  /**
+   * Free-form dynamic variables injected into the system prompt at the
+   * start of every call. Used to ground placeholders like
+   * `{{business_timezone}}` that the prompt header references.
+   */
+  dynamicVariables?: Record<string, string>;
   /** ISO 639-1 ASR/TTS language code. Defaults to 'en'. */
   language?: string;
   /** 0-1; lower = more deterministic. Defaults to the SDK's default. */
@@ -218,6 +224,15 @@ function buildSdkRequest(
     agentInner.prompt = prompt;
   }
 
+  if (config.dynamicVariables) {
+    // ElevenLabs accepts `dynamicVariables.dynamicVariablePlaceholders`
+    // (camelCase, serialised to snake_case). Each value is a string that
+    // the agent's prompt may reference as `{{key}}`.
+    agentInner.dynamicVariables = {
+      dynamicVariablePlaceholders: config.dynamicVariables,
+    };
+  }
+
   if (Object.keys(agentInner).length > 0) conversationConfig.agent = agentInner;
 
   if (config.voiceId !== undefined) {
@@ -282,6 +297,45 @@ export async function createTool(
     return { toolId };
   } catch (e) {
     throw toExternalError(e, `create tool ${tool.name}`);
+  }
+}
+
+/**
+ * Updates an existing workspace tool in place. Same body shape as
+ * `createTool` — the SDK reuses `toolConfig` for both. Used by the
+ * resync flow to avoid churning fresh `tool_xxx` IDs every time.
+ */
+export async function updateTool(
+  userId: string,
+  toolId: string,
+  tool: VoiceFlowTool,
+): Promise<void> {
+  const client = await getElevenLabsClient(userId);
+  try {
+    const headers: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(tool.webhook.headers)) {
+      const match = typeof v === 'string' ? v.match(/^\{\{(system__[\w]+)\}\}$/) : null;
+      headers[k] = match ? { variableName: match[1] } : v;
+    }
+    const body = {
+      toolConfig: {
+        type: 'webhook',
+        name: tool.name,
+        description: tool.description,
+        apiSchema: {
+          url: tool.webhook.url,
+          method: tool.webhook.method,
+          requestHeaders: headers,
+          requestBodySchema: tool.parameters,
+        },
+      },
+    };
+    await client.conversationalAi.tools.update(
+      toolId,
+      body as unknown as Parameters<typeof client.conversationalAi.tools.update>[1],
+    );
+  } catch (e) {
+    throw toExternalError(e, `update tool ${tool.name}`);
   }
 }
 

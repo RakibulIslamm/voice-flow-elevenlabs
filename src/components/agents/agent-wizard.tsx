@@ -163,8 +163,10 @@ type WizardData = {
   template?: TemplateKey;
   businessName: string;
   businessHours: BusinessHours;
+  businessTimezone: string;
   location: string;
   phone: string;
+  website: string;
   agentName: string;
   greeting: string;
   voiceId: string;
@@ -179,8 +181,10 @@ const emptyData: WizardData = {
   template: undefined,
   businessName: '',
   businessHours: defaultBusinessHours,
+  businessTimezone: detectInitialTimezone(),
   location: '',
   phone: '',
+  website: '',
   agentName: '',
   greeting: '',
   voiceId: '',
@@ -190,6 +194,44 @@ const emptyData: WizardData = {
   publicSlug: '',
   allowedDomains: [],
 };
+
+function detectInitialTimezone(): string {
+  if (typeof Intl === 'undefined') return 'UTC';
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+const COMMON_TIMEZONES = [
+  'UTC',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Toronto',
+  'America/Sao_Paulo',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Madrid',
+  'Europe/Istanbul',
+  'Africa/Cairo',
+  'Africa/Johannesburg',
+  'Asia/Dubai',
+  'Asia/Karachi',
+  'Asia/Dhaka',
+  'Asia/Kolkata',
+  'Asia/Bangkok',
+  'Asia/Singapore',
+  'Asia/Hong_Kong',
+  'Asia/Shanghai',
+  'Asia/Tokyo',
+  'Asia/Seoul',
+  'Australia/Sydney',
+  'Pacific/Auckland',
+] as const;
 
 // ---------------------------------------------------------------------------
 // Slide variants
@@ -262,8 +304,10 @@ export function AgentWizard() {
         template: data.template,
         businessName: data.businessName,
         businessHours: data.businessHours,
+        businessTimezone: data.businessTimezone,
         location: data.location || undefined,
         phone: data.phone || undefined,
+        website: data.website || undefined,
         agentName: data.agentName,
         greeting: data.greeting,
         voiceId: data.voiceId,
@@ -710,6 +754,45 @@ function StepBusiness({
               placeholder="+1 555 123 4567"
               className="h-11"
             />
+          </FieldGroup>
+        </SectionCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <SectionCard>
+          <FieldGroup label="Website (optional)" hint="Shared when the caller asks for your URL.">
+            <Input
+              id="website"
+              type="url"
+              value={data.website}
+              onChange={(e) => update({ website: e.target.value })}
+              placeholder="https://example.com"
+              className="h-11"
+            />
+          </FieldGroup>
+        </SectionCard>
+        <SectionCard>
+          <FieldGroup
+            label="Timezone"
+            hint="Grounds 'today' and 'tomorrow' for the agent. Pre-filled from your browser."
+          >
+            <select
+              id="businessTimezone"
+              value={data.businessTimezone}
+              onChange={(e) => update({ businessTimezone: e.target.value })}
+              className="h-11 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              {COMMON_TIMEZONES.includes(
+                data.businessTimezone as (typeof COMMON_TIMEZONES)[number],
+              ) ? null : (
+                <option value={data.businessTimezone}>{data.businessTimezone} (detected)</option>
+              )}
+              {COMMON_TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
           </FieldGroup>
         </SectionCard>
       </div>

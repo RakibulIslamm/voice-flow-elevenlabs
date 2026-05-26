@@ -21,23 +21,34 @@ export type AgentPhoneChannel = {
   twilioPhoneNumber?: string;
 };
 
+export type AgentToolRef = {
+  /** VoiceFlow's stable tool name (`book_reservation`, `lookup_booking`, …). */
+  name: string;
+  /** ElevenLabs `tool_xxx` id for this tool in the user's workspace. */
+  id: string;
+};
+
 export type AgentDoc = {
   _id: Types.ObjectId;
   userId: Types.ObjectId;
   name: string;
   template: AgentTemplate;
   businessName?: string;
+  businessAddress?: string;
+  businessPhone?: string;
+  businessWebsite?: string;
+  /** IANA timezone (e.g. "America/New_York"). Used to ground "today/tomorrow" for the LLM. */
+  businessTimezone: string;
   businessHours?: unknown;
   faq: AgentFaqEntry[];
   elevenLabsAgentId: string;
   elevenLabsPhoneAgentId?: string;
   /**
-   * IDs of the standalone ElevenLabs tool documents this agent depends on.
-   * ElevenLabs moved away from inline `prompt.tools` in favour of separate
-   * tool resources referenced by `prompt.toolIds`. We track them here so
-   * we can re-sync (delete + recreate) and clean up on agent deletion.
+   * Mapping of VoiceFlow tool name → ElevenLabs tool document id, so we can
+   * **update existing tools in place** on resync instead of churning new
+   * docs each time. Ordered for stable iteration.
    */
-  elevenLabsToolIds: string[];
+  elevenLabsTools: AgentToolRef[];
   voiceId: string;
   greeting?: string;
   systemPrompt?: string;
@@ -68,6 +79,14 @@ const browserChannelSchema = new Schema<AgentBrowserChannel>(
   { _id: false },
 );
 
+const toolRefSchema = new Schema<AgentToolRef>(
+  {
+    name: { type: String, required: true },
+    id: { type: String, required: true },
+  },
+  { _id: false },
+);
+
 const phoneChannelSchema = new Schema<AgentPhoneChannel>(
   {
     enabled: { type: Boolean, default: false },
@@ -87,11 +106,15 @@ const agentSchema = new Schema<AgentDoc>(
       required: true,
     },
     businessName: { type: String },
+    businessAddress: { type: String },
+    businessPhone: { type: String },
+    businessWebsite: { type: String },
+    businessTimezone: { type: String, default: 'UTC', required: true },
     businessHours: { type: Schema.Types.Mixed },
     faq: { type: [faqEntrySchema], default: [] },
     elevenLabsAgentId: { type: String, required: true, unique: true },
     elevenLabsPhoneAgentId: { type: String, sparse: true, unique: true },
-    elevenLabsToolIds: { type: [String], default: [] },
+    elevenLabsTools: { type: [toolRefSchema], default: [] },
     voiceId: { type: String, required: true },
     greeting: { type: String },
     systemPrompt: { type: String },

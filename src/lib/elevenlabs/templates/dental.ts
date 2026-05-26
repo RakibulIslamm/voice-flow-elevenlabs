@@ -1,5 +1,6 @@
 import 'server-only';
 import type { Template, BusinessInfo } from './types';
+import { buildSharedPromptHeader } from './prompt-header';
 
 /**
  * Dental receptionist. Optimised for short voice turns. The prompt
@@ -16,6 +17,7 @@ const defaultFAQ = [
 function buildSystemPrompt(info: BusinessInfo): string {
   const persona = info.agentName ?? 'the receptionist';
   return [
+    buildSharedPromptHeader(),
     `You are ${persona}, the receptionist at ${info.name}.`,
     `You answer phone calls and chat from the website. Speak naturally — use contractions, keep replies to 1-2 sentences, and ask only one question at a time.`,
     ``,
@@ -62,7 +64,18 @@ function buildGreeting(info: BusinessInfo): string {
 
 export const dentalTemplate: Template = {
   key: 'dental',
-  availableToolNames: ['check_availability', 'book_appointment', 'transfer_to_human'],
+  availableToolNames: [
+    'check_availability',
+    'book_appointment',
+    'lookup_booking',
+    'cancel_booking',
+    'reschedule_booking',
+    'get_business_hours',
+    'get_business_info',
+    'get_current_datetime',
+    'send_confirmation',
+    'transfer_to_human',
+  ],
   buildSystemPrompt,
   buildGreeting,
   defaultFAQ,

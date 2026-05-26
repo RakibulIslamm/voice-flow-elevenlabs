@@ -39,10 +39,15 @@ export async function sendToolNotification(ctx: ToolEmailContext): Promise<void>
   );
 
   const subjectPrefix = ctx.urgent ? '[VoiceFlow] URGENT' : '[VoiceFlow]';
-  const subject =
-    ctx.kind === 'transfer'
-      ? `${subjectPrefix} Call transfer requested — ${ctx.businessName || ctx.agentName}`
-      : `${subjectPrefix} New ${ctx.kind} — ${ctx.businessName || ctx.agentName}`;
+  const subjectByKind: Record<typeof ctx.kind, string> = {
+    transfer: 'Call transfer requested',
+    cancellation: 'Booking cancelled',
+    reschedule: 'Booking rescheduled',
+    appointment: 'New appointment',
+    reservation: 'New reservation',
+    lead: 'New lead',
+  };
+  const subject = `${subjectPrefix} ${subjectByKind[ctx.kind]} — ${ctx.businessName || ctx.agentName}`;
 
   const text = ctx.rows.map((r) => `${r.label}: ${r.value}`).join('\n');
 

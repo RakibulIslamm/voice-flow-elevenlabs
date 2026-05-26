@@ -9,7 +9,12 @@ import {
   type TranscriptTurn,
 } from '@/lib/db/models/call';
 import { Agent, type AgentDoc } from '@/lib/db/models/agent';
-import { Capture, type CaptureDoc, type CaptureType } from '@/lib/db/models/capture';
+import {
+  Capture,
+  type CaptureDoc,
+  type CaptureStatus,
+  type CaptureType,
+} from '@/lib/db/models/capture';
 import {
   CallDetail,
   type CallDetailData,
@@ -47,7 +52,7 @@ export default async function CallDetailPage({
       .lean<Pick<AgentDoc, '_id' | 'name' | 'businessName'> | null>(),
     Capture.find({ callId: call._id })
       .sort({ createdAt: -1 })
-      .lean<Pick<CaptureDoc, '_id' | 'type' | 'data' | 'createdAt'>[]>(),
+      .lean<Pick<CaptureDoc, '_id' | 'type' | 'status' | 'code' | 'data' | 'createdAt'>[]>(),
   ]);
 
   const callerInfo = call.callerInfo as
@@ -88,6 +93,8 @@ export default async function CallDetailPage({
   const captureItems: CallCaptureItem[] = (captures ?? []).map((c) => ({
     id: c._id.toString(),
     type: c.type as CaptureType,
+    status: (c.status ?? 'confirmed') as CaptureStatus,
+    code: c.code ?? null,
     data: c.data,
     createdAt: c.createdAt.toISOString(),
   }));

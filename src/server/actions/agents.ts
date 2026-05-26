@@ -20,6 +20,7 @@ import {
   updateAgent as updateElevenLabsAgent,
   getAgent as getElevenLabsAgent,
   createTool as createElevenLabsTool,
+  updateTool as updateElevenLabsTool,
   deleteTool as deleteElevenLabsTool,
   type AgentConfig,
 } from '@/lib/elevenlabs/agents';
@@ -70,8 +71,10 @@ const createAgentInputSchema = z.object({
   // Step 2
   businessName: z.string().trim().min(1).max(80),
   businessHours: businessHoursSchema,
+  businessTimezone: z.string().trim().min(1).max(80).default('UTC'),
   location: z.string().trim().max(200).optional(),
   phone: z.string().trim().max(40).optional(),
+  website: z.string().trim().max(200).url().optional().or(z.literal('').transform(() => undefined)),
   // Step 3
   agentName: z.string().trim().min(1).max(40),
   greeting: z.string().trim().min(1).max(200),
@@ -137,7 +140,8 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
   //    needs the resulting tool IDs to wire them in via `prompt.toolIds`.
   //    If any tool create fails, roll back the ones we did create so we
   //    don't leave orphans in their dashboard.
-  const toolIds = await provisionTools(userId, tools, 'create');
+  const toolRefs = await createToolBatch(userId, tools);
+  const toolIds = toolRefs.map((t) => t.id);
 
   // 5. Provision the agent itself. If this throws AFTER tool creates,
   //    clean up the tools too.
@@ -150,10 +154,11 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
       systemPrompt: input.systemPrompt,
       llm: 'gemini-2.5-flash',
       toolIds,
+      dynamicVariables: { business_timezone: input.businessTimezone },
     });
     elevenLabsAgentId = res.agentId;
   } catch (e) {
-    await cleanupTools(userId, toolIds);
+    await deleteToolBatch(userId, toolIds);
     throw e;
   }
 
@@ -165,10 +170,14 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
       name: input.agentName,
       template: input.template,
       businessName: input.businessName,
+      businessAddress: input.location,
+      businessPhone: input.phone,
+      businessWebsite: input.website,
+      businessTimezone: input.businessTimezone,
       businessHours: input.businessHours,
       faq: input.faq,
       elevenLabsAgentId,
-      elevenLabsToolIds: toolIds,
+      elevenLabsTools: toolRefs,
       voiceId: input.voiceId,
       greeting: input.greeting,
       systemPrompt: input.systemPrompt,
@@ -213,7 +222,7 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
         { severity: 'high' },
       );
     }
-    await cleanupTools(userId, toolIds);
+    await deleteToolBatch(userId, toolIds);
 
     throw new ExternalServiceError(
       'VoiceFlow',
@@ -222,26 +231,74 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
   }
 });
 
-async function provisionTools(
-  userId: string,
-  tools: VoiceFlowTool[],
-  _stage: 'create' | 'resync',
-): Promise<string[]> {
-  const created: string[] = [];
+type ToolRef = { name: string; id: string };
+
+/**
+ * Fresh batch create — used at agent creation time. Rolls back any
+ * partially-created tools if a later create throws.
+ */
+async function createToolBatch(userId: string, tools: VoiceFlowTool[]): Promise<ToolRef[]> {
+  const created: ToolRef[] = [];
   try {
     for (const tool of tools) {
       const { toolId } = await createElevenLabsTool(userId, tool);
-      created.push(toolId);
+      created.push({ name: tool.name, id: toolId });
     }
     return created;
   } catch (e) {
-    await cleanupTools(userId, created);
+    await deleteToolBatch(
+      userId,
+      created.map((c) => c.id),
+    );
     throw e;
   }
 }
 
-async function cleanupTools(userId: string, toolIds: string[]): Promise<void> {
+async function deleteToolBatch(userId: string, toolIds: string[]): Promise<void> {
   await Promise.all(toolIds.map((id) => deleteElevenLabsTool(userId, id)));
+}
+
+/**
+ * Reconcile a desired tool catalog against the agent's existing tool
+ * refs. Updates tools that still exist (same name) in place, creates
+ * new ones, and deletes the ones that fell out of the catalog. Returns
+ * the new full ref list to persist on the agent doc.
+ *
+ * Best-effort: an update failure falls back to delete + create so a
+ * tool whose underlying doc was deleted out-of-band in the ElevenLabs
+ * dashboard still re-syncs cleanly. We don't try to recover from
+ * partial state — caller logs the error and the user can retry.
+ */
+async function reconcileTools(
+  userId: string,
+  desiredTools: VoiceFlowTool[],
+  existing: ToolRef[],
+): Promise<{ refs: ToolRef[]; orphanedIds: string[] }> {
+  const existingByName = new Map(existing.map((r) => [r.name, r.id] as const));
+  const desiredNames = new Set<string>(desiredTools.map((t) => t.name));
+  const refs: ToolRef[] = [];
+
+  for (const tool of desiredTools) {
+    const existingId = existingByName.get(tool.name);
+    if (existingId) {
+      try {
+        await updateElevenLabsTool(userId, existingId, tool);
+        refs.push({ name: tool.name, id: existingId });
+        continue;
+      } catch {
+        // Update failed — likely the doc was deleted out-of-band. Fall
+        // through to create a fresh one.
+      }
+    }
+    const { toolId } = await createElevenLabsTool(userId, tool);
+    refs.push({ name: tool.name, id: toolId });
+  }
+
+  const orphanedIds = existing
+    .filter((r) => !desiredNames.has(r.name))
+    .map((r) => r.id);
+
+  return { refs, orphanedIds };
 }
 
 /**
@@ -338,6 +395,16 @@ const updateAgentInputSchema = z.object({
   // Basic info
   name: z.string().trim().min(1).max(40).optional(),
   businessName: z.string().trim().min(1).max(80).optional(),
+  businessAddress: z.string().trim().max(200).optional(),
+  businessPhone: z.string().trim().max(40).optional(),
+  businessWebsite: z
+    .string()
+    .trim()
+    .max(200)
+    .url()
+    .optional()
+    .or(z.literal('').transform(() => undefined)),
+  businessTimezone: z.string().trim().min(1).max(80).optional(),
   businessHours: businessHoursSchema,
   faq: z.array(faqEntrySchema).max(100).optional(),
   // Voice / personality
@@ -367,6 +434,9 @@ export const updateAgent = safeAction(updateAgentInputSchema, async (input) => {
   }
   if (input.greeting !== undefined) elPatch.firstMessage = input.greeting;
   if (input.systemPrompt !== undefined) elPatch.systemPrompt = input.systemPrompt;
+  if (input.businessTimezone !== undefined) {
+    elPatch.dynamicVariables = { business_timezone: input.businessTimezone };
+  }
 
   if (Object.keys(elPatch).length > 0) {
     await updateElevenLabsAgent(userId, agent.elevenLabsAgentId, elPatch);
@@ -374,6 +444,10 @@ export const updateAgent = safeAction(updateAgentInputSchema, async (input) => {
 
   if (input.name !== undefined) agent.name = input.name;
   if (input.businessName !== undefined) agent.businessName = input.businessName;
+  if (input.businessAddress !== undefined) agent.businessAddress = input.businessAddress;
+  if (input.businessPhone !== undefined) agent.businessPhone = input.businessPhone;
+  if (input.businessWebsite !== undefined) agent.businessWebsite = input.businessWebsite;
+  if (input.businessTimezone !== undefined) agent.businessTimezone = input.businessTimezone;
   if (input.businessHours !== undefined) agent.businessHours = input.businessHours;
   if (input.faq !== undefined) agent.faq = input.faq;
   if (input.greeting !== undefined) agent.greeting = input.greeting;
@@ -459,7 +533,7 @@ export const deleteAgent = safeAction(deleteAgentInputSchema, async (input) => {
     }
 
     // Clean up the standalone tool documents the agent depended on.
-    await cleanupTools(userId, agent.elevenLabsToolIds ?? []);
+    await deleteToolBatch(userId, (agent.elevenLabsTools ?? []).map((t) => t.id));
   } else {
     void trackEvent('agent.delete.skip_elevenlabs', {
       userId,
@@ -660,55 +734,111 @@ export const resyncAgentTools = safeAction(resyncToolsInputSchema, async (input)
   const agent = await loadOwnedAgent(input.agentId, userId);
   await requireElevenLabsConnection(userId);
 
-  const tools = getToolsForTemplate(agent.template as TemplateKey);
-  const previousToolIds = [...(agent.elevenLabsToolIds ?? [])];
+  const desiredTools = getToolsForTemplate(agent.template as TemplateKey);
+  const existing = (agent.elevenLabsTools ?? []).map((t) => ({ name: t.name, id: t.id }));
 
-  // Step 1: create fresh tool documents.
-  let newToolIds: string[];
+  // Step 1: reconcile — update in place where possible, create only new
+  // names, surface orphans for cleanup.
+  let refs: ToolRef[];
+  let orphanedIds: string[];
   try {
-    newToolIds = await provisionTools(userId, tools, 'resync');
+    const result = await reconcileTools(userId, desiredTools, existing);
+    refs = result.refs;
+    orphanedIds = result.orphanedIds;
   } catch (e) {
     void logError(e, {
       scope: 'resyncAgentTools',
-      stage: 'create-tools',
+      stage: 'reconcile-tools',
       agentId: agent._id.toString(),
     });
     throw new ExternalServiceError(
       'ElevenLabs',
-      'Failed to create new tool resources. Please try again.',
+      'Failed to sync tool resources. Please try again.',
     );
   }
 
-  // Step 2: point the agent at the new tools.
+  // Step 2: point the agent at the (possibly unchanged) tool ID list.
+  // We always send to clear stale `toolIds` cached on ElevenLabs side.
   try {
-    await updateElevenLabsAgent(userId, agent.elevenLabsAgentId, { toolIds: newToolIds });
+    await updateElevenLabsAgent(userId, agent.elevenLabsAgentId, {
+      toolIds: refs.map((r) => r.id),
+    });
   } catch (e) {
     void logError(e, {
       scope: 'resyncAgentTools',
       stage: 'update-agent',
       agentId: agent._id.toString(),
     });
-    await cleanupTools(userId, newToolIds);
     throw new ExternalServiceError(
       'ElevenLabs',
       'Failed to re-sync tool configuration. Please try again.',
     );
   }
 
-  // Step 3: persist the new IDs so we know what to clean up next time.
-  agent.elevenLabsToolIds = newToolIds;
+  // Step 3: persist the merged refs.
+  agent.elevenLabsTools = refs;
   await agent.save();
 
-  // Step 4: best-effort delete the previous tools (orphaned now).
-  await cleanupTools(userId, previousToolIds);
+  // Step 4: best-effort delete the orphans (tools no longer in the catalog).
+  await deleteToolBatch(userId, orphanedIds);
 
   void trackEvent('agent.tools_resynced', {
     userId,
     agentId: agent._id.toString(),
-    properties: { toolCount: tools.length },
+    properties: { toolCount: refs.length, orphansDeleted: orphanedIds.length },
   });
 
-  return { ok: true as const, toolCount: tools.length };
+  return { ok: true as const, toolCount: refs.length };
+});
+
+const resyncSettingsInputSchema = z.object({ agentId: objectIdSchema });
+
+/**
+ * Re-pushes the agent's saved system prompt + dynamic variables to
+ * ElevenLabs. Use when the date-grounding header (or the operator's
+ * edited prompt) needs to land on a previously-created agent.
+ *
+ * Idempotent — safe to call repeatedly.
+ */
+export const resyncAgentSettings = safeAction(resyncSettingsInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+  await requireElevenLabsConnection(userId);
+
+  if (!agent.systemPrompt) {
+    throw new AppError({
+      code: 'MISSING_PROMPT',
+      statusCode: 400,
+      publicMessage: 'This agent has no saved system prompt to re-sync.',
+    });
+  }
+
+  try {
+    await updateElevenLabsAgent(userId, agent.elevenLabsAgentId, {
+      systemPrompt: agent.systemPrompt,
+      firstMessage: agent.greeting,
+      dynamicVariables: { business_timezone: agent.businessTimezone || 'UTC' },
+    });
+  } catch (e) {
+    void logError(e, {
+      scope: 'resyncAgentSettings',
+      agentId: agent._id.toString(),
+    });
+    throw new ExternalServiceError(
+      'ElevenLabs',
+      'Failed to re-sync agent settings. Please try again.',
+    );
+  }
+
+  void trackEvent('agent.settings_resynced', {
+    userId,
+    agentId: agent._id.toString(),
+  });
+
+  return { ok: true as const };
 });
 
 // ---------------------------------------------------------------------------

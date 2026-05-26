@@ -1,5 +1,6 @@
 import 'server-only';
 import type { Template, BusinessInfo } from './types';
+import { buildSharedPromptHeader } from './prompt-header';
 
 /**
  * Restaurant host. Optimised for fast reservation flows: collect name,
@@ -15,6 +16,7 @@ const defaultFAQ = [
 function buildSystemPrompt(info: BusinessInfo): string {
   const persona = info.agentName ?? 'the host';
   return [
+    buildSharedPromptHeader(),
     `You are ${persona} at ${info.name}, a restaurant. You handle reservations and answer questions over the phone or web chat.`,
     `Speak naturally — short replies, contractions, one question at a time.`,
     ``,
@@ -63,7 +65,18 @@ function buildGreeting(info: BusinessInfo): string {
 
 export const restaurantTemplate: Template = {
   key: 'restaurant',
-  availableToolNames: ['check_availability', 'book_reservation', 'transfer_to_human'],
+  availableToolNames: [
+    'check_availability',
+    'book_reservation',
+    'lookup_booking',
+    'cancel_booking',
+    'reschedule_booking',
+    'get_business_hours',
+    'get_business_info',
+    'get_current_datetime',
+    'send_confirmation',
+    'transfer_to_human',
+  ],
   buildSystemPrompt,
   buildGreeting,
   defaultFAQ,

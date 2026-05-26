@@ -1,5 +1,6 @@
 import 'server-only';
 import type { Template, BusinessInfo } from './types';
+import { buildSharedPromptHeader } from './prompt-header';
 
 /**
  * Inbound lead qualifier. Used by B2B sites where the AI agent is the
@@ -16,6 +17,7 @@ const defaultFAQ = [
 function buildSystemPrompt(info: BusinessInfo): string {
   const persona = info.agentName ?? 'an account specialist';
   return [
+    buildSharedPromptHeader(),
     `You are ${persona} at ${info.name}. You handle inbound calls and chat from people interested in the product.`,
     `Speak naturally — short replies, contractions, one question at a time. You're consultative, never salesy.`,
     ``,
@@ -62,7 +64,13 @@ function buildGreeting(info: BusinessInfo): string {
 
 export const leadQualifierTemplate: Template = {
   key: 'lead-qualifier',
-  availableToolNames: ['log_lead', 'transfer_to_human'],
+  availableToolNames: [
+    'log_lead',
+    'get_business_info',
+    'get_current_datetime',
+    'send_confirmation',
+    'transfer_to_human',
+  ],
   buildSystemPrompt,
   buildGreeting,
   defaultFAQ,

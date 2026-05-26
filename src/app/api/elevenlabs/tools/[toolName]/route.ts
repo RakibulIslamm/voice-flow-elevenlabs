@@ -13,6 +13,13 @@ const KNOWN_TOOLS: Set<VoiceFlowToolName> = new Set([
   'book_reservation',
   'log_lead',
   'transfer_to_human',
+  'get_current_datetime',
+  'get_business_hours',
+  'get_business_info',
+  'lookup_booking',
+  'cancel_booking',
+  'reschedule_booking',
+  'send_confirmation',
 ]);
 
 /**
