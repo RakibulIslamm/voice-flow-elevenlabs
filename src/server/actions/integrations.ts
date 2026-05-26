@@ -1,17 +1,34 @@
 'use server';
 
 import { z } from 'zod';
+import { Types } from 'mongoose';
+import twilio from 'twilio';
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import { safeAction } from '@/lib/safe-action';
 import { requireUser } from '@/lib/auth/guards';
 import { connectDb } from '@/lib/db/connect';
-import { User, type ElevenLabsAccountInfo } from '@/lib/db/models/user';
+import {
+  User,
+  type ElevenLabsAccountInfo,
+  type UserDoc,
+} from '@/lib/db/models/user';
 import { Agent } from '@/lib/db/models/agent';
 import { encrypt } from '@/lib/crypto';
 import { env } from '@/lib/env';
-import { AppError, InvalidCredentialError, ExternalServiceError } from '@/lib/errors';
+import {
+  AppError,
+  InvalidCredentialError,
+  ExternalServiceError,
+  QuotaExceededError,
+} from '@/lib/errors';
 import { getAccountInfo } from '@/lib/elevenlabs/account';
 import { requireElevenLabsConnection } from '@/lib/elevenlabs/require';
+import {
+  clearPhoneNumberWebhook,
+  getUserTwilioClient,
+  listUserPhoneNumbers,
+  type UserPhoneNumber,
+} from '@/lib/twilio/user-client';
 import { trackEvent } from '@/lib/tracking/event';
 
 /**
@@ -229,6 +246,277 @@ export const disconnectElevenLabs = safeAction(noInput, async () => {
 
   return { ok: true as const };
 });
+
+// ---------------------------------------------------------------------------
+// Twilio (Phase 12)
+// ---------------------------------------------------------------------------
+
+/**
+ * Plans that may connect Twilio. Free + starter are gated behind the
+ * paywall — the dialog hides the connect button in those cases too, but
+ * we enforce server-side as defence-in-depth.
+ */
+const PHONE_PLANS = new Set<UserDoc['plan']>(['pro', 'business']);
+
+const twilioConnectSchema = z.object({
+  accountSid: z
+    .string()
+    .trim()
+    .regex(/^AC[a-f0-9]{32}$/i, 'Account SID must start with AC followed by 32 hex characters.'),
+  authToken: z
+    .string()
+    .trim()
+    .min(20, 'Auth Token looks too short. Copy it from Twilio Console → API keys & tokens.'),
+});
+
+export const connectTwilio = safeAction(twilioConnectSchema, async ({ accountSid, authToken }) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  ensureEncryptionConfigured();
+
+  await connectDb();
+  // Plan check — server-side defence in depth. The UI also hides the
+  // button for free/starter, but we never trust client-side gating.
+  const user = await User.findById(userId).select('plan').lean<Pick<UserDoc, 'plan'> | null>();
+  if (!user) {
+    throw new InvalidCredentialError('VoiceFlow', 'Account not found.');
+  }
+  if (!PHONE_PLANS.has(user.plan)) {
+    throw new QuotaExceededError(
+      'Phone calling requires Pro plan or above. Please upgrade in Billing.',
+    );
+  }
+
+  // Verify creds by hitting Twilio's Account.fetch endpoint. This is the
+  // standard "is this account live and is this token valid?" probe — it
+  // returns the account name + status, which we also surface to the user
+  // post-connect as confirmation we hit the right account.
+  await verifyTwilioCreds(accountSid, authToken);
+
+  const encryptedCreds = safeEncrypt(JSON.stringify({ accountSid, authToken }));
+  const accountSidPreview = `...${accountSid.slice(-4)}`;
+  const now = new Date();
+
+  await User.updateOne(
+    { _id: userId },
+    {
+      $set: {
+        'integrations.twilio.enabled': true,
+        'integrations.twilio.encryptedCreds': encryptedCreds,
+        'integrations.twilio.accountSidPreview': accountSidPreview,
+        'integrations.twilio.connectedAt': now,
+        'integrations.twilio.verifiedAt': now,
+      },
+    },
+  );
+
+  void trackEvent('integration.twilio.connected', { userId });
+
+  return { ok: true as const, accountSidPreview };
+});
+
+export const testTwilioConnection = safeAction(noInput, async () => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  // Touch the SDK with the stored creds — proves the auth token still
+  // works (Twilio can rotate it from their console) and refreshes the
+  // verifiedAt timestamp so the UI doesn't show a stale "last verified"
+  // forever.
+  let client;
+  try {
+    client = await getUserTwilioClient(userId);
+  } catch (e) {
+    if (e instanceof Error && e.name === 'IntegrationDisconnectedError') throw e;
+    throw e;
+  }
+
+  try {
+    const account = await client.api.v2010.accounts(client.accountSid).fetch();
+    if (account.status !== 'active') {
+      throw new InvalidCredentialError(
+        'Twilio',
+        `Your Twilio account is "${account.status}" — please reactivate it in the Twilio console.`,
+      );
+    }
+  } catch (e) {
+    if (isTwilioAuthError(e)) {
+      throw new InvalidCredentialError(
+        'Twilio',
+        'Your Twilio Auth Token seems invalid or rotated. Please reconnect.',
+      );
+    }
+    if (e instanceof InvalidCredentialError) throw e;
+    throw new ExternalServiceError(
+      'Twilio',
+      e instanceof Error ? e.message : 'Failed to reach Twilio.',
+    );
+  }
+
+  await connectDb();
+  await User.updateOne(
+    { _id: userId },
+    { $set: { 'integrations.twilio.verifiedAt': new Date() } },
+  );
+
+  return { ok: true as const };
+});
+
+/**
+ * Returns the user's Twilio phone numbers — used by the integration
+ * detail page and the per-agent phone picker. We also annotate each
+ * number with the agent (if any) currently assigned to it, so the UI
+ * can show "assigned to {agent}" inline.
+ */
+export const listTwilioPhoneNumbers = safeAction(noInput, async () => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  const numbers = await listUserPhoneNumbers(userId);
+
+  await connectDb();
+  // Look up which numbers are assigned to this user's agents so we can
+  // tag them in the UI. One query for all SIDs.
+  const sids = numbers.map((n) => n.sid);
+  type AssignedAgent = {
+    _id: Types.ObjectId;
+    name: string;
+    channels?: { phone?: { twilioPhoneNumberSid?: string } };
+  };
+  const agents: AssignedAgent[] = sids.length
+    ? await Agent.find({
+        userId,
+        'channels.phone.twilioPhoneNumberSid': { $in: sids },
+      })
+        .select('_id name channels.phone.twilioPhoneNumberSid')
+        .lean<AssignedAgent[]>()
+    : [];
+  const bySid = new Map<string, { agentId: string; agentName: string }>();
+  for (const a of agents) {
+    const sid = a.channels?.phone?.twilioPhoneNumberSid;
+    if (sid) bySid.set(sid, { agentId: a._id.toString(), agentName: a.name });
+  }
+
+  const enriched: Array<UserPhoneNumber & { assignedAgent: { id: string; name: string } | null }> =
+    numbers.map((n) => ({
+      ...n,
+      assignedAgent: bySid.get(n.sid) ? { id: bySid.get(n.sid)!.agentId, name: bySid.get(n.sid)!.agentName } : null,
+    }));
+
+  return { ok: true as const, numbers: enriched };
+});
+
+/**
+ * Disconnect Twilio. We deliberately tear down any phone-enabled agents
+ * first — the bridge needs Twilio creds, so leaving them "enabled" would
+ * silently fail every inbound call until the user notices.
+ *
+ * Webhook clears are best-effort. If Twilio's API is unreachable the
+ * disconnect still succeeds locally; the worst case is an orphan webhook
+ * URL that points at our server and gets gracefully rejected by the
+ * incoming handler when the agent isn't active.
+ */
+export const disconnectTwilio = safeAction(noInput, async () => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+
+  // Find phone-enabled agents BEFORE we tear down creds — the webhook
+  // clear needs the Twilio client and the client needs the creds.
+  const phoneAgents = await Agent.find({
+    userId,
+    'channels.phone.enabled': true,
+  })
+    .select('_id channels.phone.twilioPhoneNumberSid')
+    .lean<Array<{ _id: Types.ObjectId; channels: { phone: { twilioPhoneNumberSid?: string } } }>>();
+
+  // Best-effort webhook clears in parallel.
+  await Promise.allSettled(
+    phoneAgents.map(async (a) => {
+      const sid = a.channels?.phone?.twilioPhoneNumberSid;
+      if (sid) await clearPhoneNumberWebhook(userId, sid);
+    }),
+  );
+
+  // Disable phone channel on every affected agent in one query.
+  if (phoneAgents.length > 0) {
+    await Agent.updateMany(
+      { _id: { $in: phoneAgents.map((a) => a._id) } },
+      {
+        $set: { 'channels.phone.enabled': false },
+        $unset: {
+          'channels.phone.twilioPhoneNumberSid': '',
+          'channels.phone.twilioPhoneNumber': '',
+        },
+      },
+    );
+  }
+
+  // Then clear the user's Twilio integration.
+  await User.updateOne(
+    { _id: userId },
+    {
+      $set: { 'integrations.twilio.enabled': false },
+      $unset: {
+        'integrations.twilio.encryptedCreds': '',
+        'integrations.twilio.accountSidPreview': '',
+        'integrations.twilio.verifiedAt': '',
+      },
+    },
+  );
+
+  void trackEvent('integration.twilio.disconnected', {
+    userId,
+    properties: { agentsAffected: phoneAgents.length },
+  });
+
+  return { ok: true as const, agentsDisabled: phoneAgents.length };
+});
+
+async function verifyTwilioCreds(accountSid: string, authToken: string): Promise<void> {
+  let client: ReturnType<typeof twilio>;
+  try {
+    client = twilio(accountSid, authToken);
+  } catch {
+    throw new InvalidCredentialError(
+      'Twilio',
+      'Invalid Twilio Account SID. Please verify and try again.',
+    );
+  }
+  try {
+    const account = await client.api.v2010.accounts(accountSid).fetch();
+    if (account.status === 'closed' || account.status === 'suspended') {
+      throw new InvalidCredentialError(
+        'Twilio',
+        `Your Twilio account is "${account.status}". Reactivate it in the Twilio console first.`,
+      );
+    }
+  } catch (e) {
+    if (e instanceof InvalidCredentialError) throw e;
+    if (isTwilioAuthError(e)) {
+      throw new InvalidCredentialError(
+        'Twilio',
+        'Invalid Twilio Auth Token. Please verify and try again.',
+      );
+    }
+    throw new ExternalServiceError(
+      'Twilio',
+      e instanceof Error ? e.message : 'Failed to reach Twilio.',
+    );
+  }
+}
+
+function isTwilioAuthError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const r = e as Record<string, unknown>;
+  if (r.status === 401 || r.status === 403) return true;
+  if (typeof r.message === 'string' && /authenticate|invalid.*token|unauthori[sz]ed/i.test(r.message)) {
+    return true;
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Internal

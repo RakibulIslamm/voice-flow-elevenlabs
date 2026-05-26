@@ -1,6 +1,11 @@
 import { requireUserOrRedirect } from '@/lib/auth/guards';
 import { connectDb } from '@/lib/db/connect';
-import { User, type ElevenLabsIntegration } from '@/lib/db/models/user';
+import {
+  User,
+  type ElevenLabsIntegration,
+  type TwilioIntegration,
+  type UserPlan,
+} from '@/lib/db/models/user';
 import { PageHeader } from '@/components/layout/page-header';
 import { ElevenLabsCard } from '@/components/integrations/elevenlabs-card';
 import { TwilioCard } from '@/components/integrations/twilio-card';
@@ -13,11 +18,18 @@ export default async function IntegrationsPage() {
   const userId = session.user.id;
 
   await connectDb();
+  type LeanUser = {
+    plan?: UserPlan;
+    integrations?: { elevenlabs?: ElevenLabsIntegration; twilio?: TwilioIntegration };
+  } | null;
   const user = await User.findById(userId)
-    .select('integrations.elevenlabs.enabled integrations.elevenlabs.accountInfo.tier')
-    .lean<{ integrations: { elevenlabs: ElevenLabsIntegration } } | null>();
+    .select(
+      'plan integrations.elevenlabs.enabled integrations.elevenlabs.accountInfo.tier integrations.twilio.enabled integrations.twilio.accountSidPreview',
+    )
+    .lean<LeanUser>();
 
-  const integration = user?.integrations?.elevenlabs;
+  const elIntegration = user?.integrations?.elevenlabs;
+  const twilioIntegration = user?.integrations?.twilio;
 
   return (
     <div className="space-y-12">
@@ -29,10 +41,14 @@ export default async function IntegrationsPage() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <ElevenLabsCard
-          connected={!!integration?.enabled}
-          tier={integration?.accountInfo?.tier}
+          connected={!!elIntegration?.enabled}
+          tier={elIntegration?.accountInfo?.tier}
         />
-        <TwilioCard />
+        <TwilioCard
+          plan={user?.plan ?? 'free'}
+          connected={!!twilioIntegration?.enabled}
+          accountSidPreview={twilioIntegration?.accountSidPreview}
+        />
       </div>
     </div>
   );

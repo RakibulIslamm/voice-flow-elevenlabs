@@ -7,11 +7,14 @@ import { toast } from 'sonner';
 import {
   AlertTriangle,
   ArrowRight,
+  CheckCircle2,
   ExternalLink,
   Globe2,
   Loader2,
   Lock,
   Phone,
+  PhoneOff,
+  PlugZap,
   RefreshCcw,
   Save,
   ShieldCheck,
@@ -33,6 +36,9 @@ import {
 import { cn } from '@/lib/utils';
 import { CopyButton } from '@/components/integrations/copy-button';
 import {
+  disablePhoneChannel,
+  enablePhoneChannel,
+  listPhoneChannelOptions,
   regenerateAgentSlug,
   updateAllowedDomains,
 } from '@/server/actions/agents';
@@ -270,9 +276,14 @@ export function AgentChannelsForm({
             <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
               Twilio not connected
             </Badge>
+          ) : agent.channels.phone.enabled ? (
+            <Badge className="border-emerald-500/30 bg-emerald-500/10 text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+              <CheckCircle2 className="mr-1 size-2.5" />
+              Live
+            </Badge>
           ) : (
-            <Badge className="bg-muted text-muted-foreground hover:bg-muted">
-              Setup pending
+            <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+              Not assigned
             </Badge>
           )}
         </CardHeader>
@@ -282,7 +293,7 @@ export function AgentChannelsForm({
           ) : !context.twilioConnected ? (
             <PhoneConnectTwilioCard />
           ) : (
-            <PhoneSetupComingSoonCard />
+            <PhoneChannelManager agent={agent} />
           )}
         </CardContent>
       </Card>
@@ -364,11 +375,278 @@ function PhoneConnectTwilioCard() {
   );
 }
 
-function PhoneSetupComingSoonCard() {
+type PhonePickerNumber = {
+  sid: string;
+  phoneNumber: string;
+  friendlyName: string;
+  capabilities: { voice: boolean; sms: boolean; mms: boolean; fax: boolean };
+};
+
+type PhonePickerOptions = {
+  assigned: PhonePickerNumber | null;
+  available: PhonePickerNumber[];
+  assignedElsewhere: Array<PhonePickerNumber & { agentId: string; agentName: string }>;
+};
+
+/**
+ * Per-agent phone picker. Holds the Twilio number list in component
+ * state and refetches via the server action — we deliberately don't
+ * load on mount (Twilio rate-limits, and most users won't open this tab)
+ * so users hit "Load numbers" to opt in to the round-trip.
+ */
+function PhoneChannelManager({ agent }: { agent: AgentDetailData }) {
+  const router = useRouter();
+  const [options, setOptions] = useState<PhonePickerOptions | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedSid, setSelectedSid] = useState<string>('');
+  const [refreshPending, startRefreshTransition] = useTransition();
+  const [enablePending, startEnableTransition] = useTransition();
+  const [disablePending, startDisableTransition] = useTransition();
+
+  const enabled = agent.channels.phone.enabled;
+  const currentNumber = agent.channels.phone.twilioPhoneNumber;
+
+  function loadOptions() {
+    startRefreshTransition(async () => {
+      setError(null);
+      try {
+        const result = await listPhoneChannelOptions({ agentId: agent.id });
+        if (result.ok) {
+          setOptions({
+            assigned: result.data.assigned,
+            available: result.data.available,
+            assignedElsewhere: result.data.assignedElsewhere,
+          });
+          if (result.data.available.length === 0 && !result.data.assigned) {
+            toast.info('No voice-enabled numbers available. Buy or release one in Twilio.');
+          }
+        } else {
+          setError(result.error.message);
+          toast.error(result.error.message);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Unknown error';
+        setError(msg);
+        toast.error('Could not fetch phone numbers.');
+      }
+    });
+  }
+
+  function onAssign() {
+    if (!selectedSid) return;
+    startEnableTransition(async () => {
+      try {
+        const result = await enablePhoneChannel({
+          agentId: agent.id,
+          twilioPhoneNumberSid: selectedSid,
+        });
+        if (result.ok) {
+          toast.success(`Phone enabled · ${result.data.phoneNumber}`);
+          setSelectedSid('');
+          setOptions(null); // force a fresh fetch on next load
+          router.refresh();
+        } else {
+          toast.error(result.error.message);
+          void reportClientError({
+            message: `enablePhoneChannel failed: ${result.error.code}`,
+            name: 'EnablePhoneChannelError',
+          });
+        }
+      } catch (e) {
+        toast.error('Something went wrong assigning the number.');
+        void reportClientError({
+          message: `enablePhoneChannel threw: ${e instanceof Error ? e.message : 'unknown'}`,
+          name: 'EnablePhoneChannelError',
+        });
+      }
+    });
+  }
+
+  function onUnassign() {
+    startDisableTransition(async () => {
+      try {
+        const result = await disablePhoneChannel({ agentId: agent.id });
+        if (result.ok) {
+          toast.success('Phone channel disabled.');
+          setOptions(null);
+          router.refresh();
+        } else {
+          toast.error(result.error.message);
+        }
+      } catch {
+        toast.error('Something went wrong unassigning the number.');
+      }
+    });
+  }
+
+  // CASE 1: Phone is already assigned — show the current number + unassign.
+  if (enabled && currentNumber) {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-col items-start justify-between gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-3">
+            <div className="grid size-10 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/30 dark:text-emerald-400">
+              <Phone className="size-5" />
+            </div>
+            <div>
+              <p className="font-mono text-sm font-medium">{currentNumber}</p>
+              <p className="text-xs text-muted-foreground">
+                Inbound calls route to this agent automatically.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={onUnassign}
+            disabled={disablePending}
+          >
+            {disablePending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <PhoneOff className="size-3.5" />
+            )}
+            Unassign
+          </Button>
+        </div>
+
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Unassigning clears the Twilio webhook but keeps the phone-side ElevenLabs agent in
+          your account, so re-assigning later is instant.
+        </p>
+      </div>
+    );
+  }
+
+  // CASE 2: Phone is NOT assigned yet — show picker.
   return (
-    <div className="rounded-xl border border-dashed border-border/70 bg-card/30 p-5 text-sm leading-relaxed text-muted-foreground">
-      Phone number picker, webhook routing and per-agent call billing land with Phase 12. Twilio
-      is connected — you&apos;ll be able to assign a number here as soon as that ships.
+    <div className="space-y-4">
+      <div className="flex flex-col items-start justify-between gap-3 rounded-2xl border border-border/70 bg-card/30 p-4 sm:flex-row sm:items-center">
+        <div>
+          <p className="text-sm font-medium">Assign a phone number</p>
+          <p className="text-xs text-muted-foreground">
+            We&apos;ll point the Twilio number at this agent and provision a phone-side
+            ElevenLabs agent on first assign.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={loadOptions} disabled={refreshPending}>
+          {refreshPending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <RefreshCcw className="size-3.5" />
+          )}
+          {options === null ? 'Load numbers' : 'Refresh'}
+        </Button>
+      </div>
+
+      {error ? (
+        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+
+      {options === null ? null : options.available.length === 0 &&
+        options.assignedElsewhere.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border/60 bg-card/30 p-5 text-center text-sm text-muted-foreground">
+          No voice-enabled numbers found in your Twilio account.
+          <div className="mt-3">
+            <Button asChild size="sm" variant="outline">
+              <a
+                href="https://console.twilio.com/us1/develop/phone-numbers/manage/search"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Buy a number
+                <ExternalLink className="size-3" />
+              </a>
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {options.available.length > 0 ? (
+            <fieldset className="space-y-2">
+              <legend className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Available
+              </legend>
+              {options.available.map((n) => (
+                <label
+                  key={n.sid}
+                  className={cn(
+                    'flex cursor-pointer items-center gap-3 rounded-xl border bg-card/40 p-3 transition hover:border-voice/40',
+                    selectedSid === n.sid
+                      ? 'border-voice/60 ring-2 ring-voice/20'
+                      : 'border-border/70',
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="twilio-number"
+                    value={n.sid}
+                    checked={selectedSid === n.sid}
+                    onChange={() => setSelectedSid(n.sid)}
+                    className="size-4 accent-voice"
+                  />
+                  <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted/60 text-muted-foreground">
+                    <Phone className="size-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-sm font-medium">{n.phoneNumber}</p>
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {n.friendlyName}
+                    </p>
+                  </div>
+                </label>
+              ))}
+            </fieldset>
+          ) : null}
+
+          {options.assignedElsewhere.length > 0 ? (
+            <fieldset className="space-y-2">
+              <legend className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Already assigned to another agent
+              </legend>
+              {options.assignedElsewhere.map((n) => (
+                <div
+                  key={n.sid}
+                  className="flex items-center gap-3 rounded-xl border border-border/50 bg-muted/20 p-3 opacity-70"
+                >
+                  <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+                    <Phone className="size-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-sm">{n.phoneNumber}</p>
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      Assigned to{' '}
+                      <Link
+                        href={`/dashboard/agents/${n.agentId}`}
+                        className="underline-offset-4 hover:text-foreground hover:underline"
+                      >
+                        {n.agentName}
+                      </Link>
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </fieldset>
+          ) : null}
+
+          <div className="flex justify-end pt-1">
+            <Button
+              onClick={onAssign}
+              disabled={!selectedSid || enablePending}
+            >
+              {enablePending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <PlugZap className="size-4" />
+              )}
+              Assign to this agent
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

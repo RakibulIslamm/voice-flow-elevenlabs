@@ -106,6 +106,34 @@ integration. Returns `{ ok: true, voiceCount, tier, charactersUsed, … }`
 if your BYOK flow works end-to-end, or a clean
 `INTEGRATION_DISCONNECTED` error if the key isn't connected yet.
 
+## Twilio is BYOK too
+
+**Phone calling is gated behind the Pro plan.** On Pro or Business, users connect
+their own Twilio account in **Integrations** — VoiceFlow stores Account SID +
+Auth Token AES-256-GCM-encrypted on the user document. From the agent's
+**Channels** tab, they pick one of their Twilio numbers; we point that number's
+Voice webhook at `/api/twilio/incoming?agentId=...` and provision a phone-side
+ElevenLabs agent in their account on first assign. Inbound calls bridge into
+the agent via Twilio Media Streams (`<Connect><Stream>` TwiML).
+
+### BYOK Twilio billing model
+
+- **You pay Twilio directly** for telecom: phone numbers (~$1/mo each), inbound
+  minutes (~$0.014/min US).
+- **VoiceFlow charges only for AI orchestration** via your VoiceFlow plan
+  ($49/mo Pro or $149/mo Business — see Billing).
+- **Total cost per phone minute:** roughly $0.014 (Twilio) + your ElevenLabs
+  character usage + nothing extra from VoiceFlow.
+- **Why?** You get full visibility and control over your costs. We don't mark
+  up Twilio.
+
+### What we never see
+
+We hold only the SID + Auth Token, encrypted. Twilio bills you directly. If you
+disconnect Twilio, we clear the webhook on every phone-enabled agent first,
+then delete the encrypted creds — your phone numbers stay in your account
+exactly as they were.
+
 ### Scripts
 
 | Command              | What it does                              |

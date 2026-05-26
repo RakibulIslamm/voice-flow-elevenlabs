@@ -14,6 +14,14 @@ import {
   AppError,
 } from '@/lib/errors';
 import { requireElevenLabsConnection } from '@/lib/elevenlabs/require';
+import { requireTwilioConnection } from '@/lib/twilio/require';
+import {
+  clearPhoneNumberWebhook,
+  configurePhoneNumberWebhook,
+  listUserPhoneNumbers,
+  type UserPhoneNumber,
+} from '@/lib/twilio/user-client';
+import { env } from '@/lib/env';
 import {
   createAgent as createElevenLabsAgent,
   deleteAgent as deleteElevenLabsAgent,
@@ -855,6 +863,266 @@ export const resyncAgentSettings = safeAction(resyncSettingsInputSchema, async (
   }
 
   void trackEvent('agent.settings_resynced', {
+    userId,
+    agentId: agent._id.toString(),
+  });
+
+  return { ok: true as const };
+});
+
+// ---------------------------------------------------------------------------
+// Phone channel (Phase 12)
+// ---------------------------------------------------------------------------
+
+const PHONE_PLANS = new Set<UserDoc['plan']>(['pro', 'business']);
+
+const phoneOptionsInputSchema = z.object({ agentId: objectIdSchema });
+
+/**
+ * Returns the data the per-agent phone picker needs: the user's plan,
+ * whether Twilio is connected, the agent's currently assigned number
+ * (if any), and the user's full number list split into "available for
+ * this agent" + "already assigned to a different agent".
+ *
+ * Bundled into one action so the UI can render in a single round-trip
+ * instead of orchestrating three independent calls.
+ */
+export const listPhoneChannelOptions = safeAction(phoneOptionsInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+
+  const user = await User.findById(userId)
+    .select('plan integrations.twilio.enabled')
+    .lean<{ plan?: UserDoc['plan']; integrations?: { twilio?: { enabled?: boolean } } } | null>();
+  const plan = user?.plan ?? 'free';
+  const planSupports = PHONE_PLANS.has(plan);
+  const twilioConnected = !!user?.integrations?.twilio?.enabled;
+
+  if (!planSupports || !twilioConnected) {
+    return {
+      ok: true as const,
+      plan,
+      planSupports,
+      twilioConnected,
+      assigned: null,
+      available: [] as UserPhoneNumber[],
+      assignedElsewhere: [] as Array<UserPhoneNumber & { agentName: string; agentId: string }>,
+    };
+  }
+
+  let numbers: UserPhoneNumber[];
+  try {
+    numbers = await listUserPhoneNumbers(userId);
+  } catch (e) {
+    void logError(e, { scope: 'listPhoneChannelOptions', userId });
+    throw e;
+  }
+
+  // Find other agents (same user) that have a phone number assigned, so
+  // we can show "already assigned to X" rather than offering a number
+  // that's currently in use.
+  const otherAgents = await Agent.find({
+    userId,
+    _id: { $ne: agent._id },
+    'channels.phone.twilioPhoneNumberSid': { $in: numbers.map((n) => n.sid) },
+  })
+    .select('_id name channels.phone.twilioPhoneNumberSid')
+    .lean<
+      Array<{
+        _id: Types.ObjectId;
+        name: string;
+        channels: { phone: { twilioPhoneNumberSid?: string } };
+      }>
+    >();
+  const otherBySid = new Map<string, { agentId: string; agentName: string }>();
+  for (const a of otherAgents) {
+    const sid = a.channels?.phone?.twilioPhoneNumberSid;
+    if (sid) otherBySid.set(sid, { agentId: a._id.toString(), agentName: a.name });
+  }
+
+  const assignedSid = agent.channels?.phone?.twilioPhoneNumberSid;
+  const assignedNumber = numbers.find((n) => n.sid === assignedSid) ?? null;
+
+  const available = numbers.filter(
+    (n) => !otherBySid.has(n.sid) && n.sid !== assignedSid && n.capabilities.voice,
+  );
+  const assignedElsewhere = numbers
+    .filter((n) => otherBySid.has(n.sid))
+    .map((n) => ({
+      ...n,
+      ...otherBySid.get(n.sid)!,
+    }));
+
+  return {
+    ok: true as const,
+    plan,
+    planSupports,
+    twilioConnected,
+    assigned: assignedNumber,
+    available,
+    assignedElsewhere,
+  };
+});
+
+const enablePhoneInputSchema = z.object({
+  agentId: objectIdSchema,
+  twilioPhoneNumberSid: z.string().regex(/^PN[a-f0-9]{32}$/i, 'Invalid Twilio phone number SID.'),
+});
+
+export const enablePhoneChannel = safeAction(enablePhoneInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+
+  // Plan + integration gates. Twilio check returns the integration so we
+  // could read account preview later if needed; for now we just need to
+  // know it's connected.
+  const user = await User.findById(userId).select('plan email').lean<
+    Pick<UserDoc, '_id' | 'email' | 'plan'> | null
+  >();
+  if (!user) {
+    throw new QuotaExceededError('Account not found.');
+  }
+  if (!PHONE_PLANS.has(user.plan)) {
+    throw new QuotaExceededError(
+      'Phone calling requires Pro plan or above. Please upgrade in Billing.',
+    );
+  }
+
+  await requireElevenLabsConnection(userId);
+  await requireTwilioConnection(userId);
+
+  // Find the number on Twilio. We list rather than fetch-by-sid because
+  // listing already returns capability info we need, and Twilio's per-sid
+  // fetch isn't substantially cheaper.
+  const numbers = await listUserPhoneNumbers(userId);
+  const number = numbers.find((n) => n.sid === input.twilioPhoneNumberSid);
+  if (!number) {
+    throw new NotFoundError('That phone number is no longer in your Twilio account.');
+  }
+  if (!number.capabilities.voice) {
+    throw new AppError({
+      code: 'INVALID_NUMBER',
+      statusCode: 400,
+      publicMessage: 'This number doesn\'t have Voice capability — pick a voice-enabled one.',
+    });
+  }
+
+  // Reject if another agent of this user is already using this number.
+  const conflict = await Agent.findOne({
+    userId,
+    _id: { $ne: agent._id },
+    'channels.phone.twilioPhoneNumberSid': input.twilioPhoneNumberSid,
+  })
+    .select('name')
+    .lean<{ name: string } | null>();
+  if (conflict) {
+    throw new AppError({
+      code: 'NUMBER_IN_USE',
+      statusCode: 409,
+      publicMessage: `This number is already assigned to "${conflict.name}". Unassign it there first.`,
+    });
+  }
+
+  // Provision the phone-specific ElevenLabs agent if we haven't already.
+  // We keep the id around even when phone is disabled — re-enabling is
+  // an in-place webhook flip, no extra ElevenLabs API calls needed.
+  if (!agent.elevenLabsPhoneAgentId) {
+    const owner = await User.findById(userId)
+      .select('email')
+      .lean<{ email: string } | null>();
+    const phoneAgentName = `${owner?.email ?? 'voiceflow'}: ${agent.name} (Phone)`;
+    const phoneConfig: AgentConfig = {
+      name: phoneAgentName,
+      voiceId: agent.voiceId,
+      firstMessage: agent.greeting ?? `Hi, thanks for calling ${agent.businessName ?? 'us'}.`,
+      systemPrompt: agent.systemPrompt ?? '',
+      llm: 'gemini-2.5-flash',
+      toolIds: (agent.elevenLabsTools ?? []).map((t) => t.id),
+      dynamicVariables: { business_timezone: agent.businessTimezone || 'UTC' },
+      ttsModelId: ttsModelFor(agent.expressiveMode ?? false),
+    };
+    try {
+      const { agentId: phoneAgentId } = await createElevenLabsAgent(userId, phoneConfig);
+      agent.elevenLabsPhoneAgentId = phoneAgentId;
+    } catch (e) {
+      void logError(e, { scope: 'enablePhoneChannel', stage: 'create-phone-agent', agentId: agent._id.toString() });
+      throw new ExternalServiceError(
+        'ElevenLabs',
+        'Failed to create the phone-side agent in ElevenLabs. Please try again.',
+      );
+    }
+  }
+
+  // Point the Twilio number at our incoming webhook.
+  const baseUrl = (env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const voiceUrl = `${baseUrl}/api/twilio/incoming?agentId=${agent._id.toString()}`;
+  const statusCallback = `${baseUrl}/api/twilio/status`;
+  try {
+    await configurePhoneNumberWebhook(userId, input.twilioPhoneNumberSid, {
+      voiceUrl,
+      statusCallback,
+      method: 'POST',
+    });
+  } catch (e) {
+    void logError(e, { scope: 'enablePhoneChannel', stage: 'configure-webhook', agentId: agent._id.toString() });
+    throw new ExternalServiceError(
+      'Twilio',
+      'Failed to configure the phone number webhook on Twilio. Please try again.',
+    );
+  }
+
+  agent.channels.phone = {
+    enabled: true,
+    twilioPhoneNumberSid: number.sid,
+    twilioPhoneNumber: number.phoneNumber,
+  };
+  await agent.save();
+
+  void trackEvent('agent.phone_enabled', {
+    userId,
+    agentId: agent._id.toString(),
+    properties: { phoneNumber: number.phoneNumber },
+  });
+
+  return {
+    ok: true as const,
+    phoneNumber: number.phoneNumber,
+    phoneNumberSid: number.sid,
+  };
+});
+
+const disablePhoneInputSchema = z.object({ agentId: objectIdSchema });
+
+export const disablePhoneChannel = safeAction(disablePhoneInputSchema, async (input) => {
+  const session = await requireUser();
+  const userId = session.user.id;
+
+  await connectDb();
+  const agent = await loadOwnedAgent(input.agentId, userId);
+
+  if (!agent.channels?.phone?.enabled) {
+    return { ok: true as const, alreadyDisabled: true };
+  }
+
+  // Best-effort webhook clear. If Twilio is unreachable we still flip
+  // the local state — better to have a stale webhook than a permanently
+  // stuck phone channel the user can't disable.
+  const sid = agent.channels.phone.twilioPhoneNumberSid;
+  if (sid) {
+    await clearPhoneNumberWebhook(userId, sid);
+  }
+
+  agent.channels.phone = { enabled: false };
+  // Keep elevenLabsPhoneAgentId so re-enable is fast.
+  await agent.save();
+
+  void trackEvent('agent.phone_disabled', {
     userId,
     agentId: agent._id.toString(),
   });
