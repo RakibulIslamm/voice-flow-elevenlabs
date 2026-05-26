@@ -67,6 +67,9 @@ import {
   resyncAgentTools,
   updateAgent,
 } from '@/server/actions/agents';
+import { CallsTable, type CallListItem } from '@/components/calls/calls-table';
+import { CapturesTable, type CaptureListItem } from '@/components/captures/captures-table';
+import type { AgentStats } from '@/lib/stats/dashboard-stats';
 import type {
   AgentBrowserChannel,
   AgentFaqEntry,
@@ -123,10 +126,16 @@ export function AgentDetail({
   agent,
   context,
   appUrl,
+  stats,
+  calls,
+  captures,
 }: {
   agent: AgentDetailData;
   context: AgentDetailContext;
   appUrl: string;
+  stats: AgentStats;
+  calls: CallListItem[];
+  captures: CaptureListItem[];
 }) {
   const [tab, setTab] = useState('overview');
   const [renameOpen, setRenameOpen] = useState(false);
@@ -169,6 +178,8 @@ export function AgentDetail({
             context={context}
             publicUrl={publicUrl}
             needsAttention={needsAttention}
+            stats={stats}
+            recentCalls={calls.slice(0, 5)}
           />
         </TabsContent>
 
@@ -181,19 +192,11 @@ export function AgentDetail({
         </TabsContent>
 
         <TabsContent value="calls" className="space-y-6">
-          <PlaceholderTab
-            icon={PhoneCall}
-            title="Calls"
-            description="Per-agent call history with transcripts, durations, and outcomes. Arrives in Phase 11."
-          />
+          <AgentCallsTab calls={calls} />
         </TabsContent>
 
         <TabsContent value="captures" className="space-y-6">
-          <PlaceholderTab
-            icon={Inbox}
-            title="Captures"
-            description="Structured data the agent captured during calls (bookings, leads, requests). Arrives in Phase 11."
-          />
+          <AgentCapturesTab captures={captures} />
         </TabsContent>
 
         <TabsContent value="settings" className="space-y-6">
@@ -427,11 +430,15 @@ function OverviewTab({
   context,
   publicUrl,
   needsAttention,
+  stats,
+  recentCalls,
 }: {
   agent: AgentDetailData;
   context: AgentDetailContext;
   publicUrl: string;
   needsAttention: boolean;
+  stats: AgentStats;
+  recentCalls: CallListItem[];
 }) {
   return (
     <>
@@ -439,20 +446,43 @@ function OverviewTab({
         <StatCard
           icon={PhoneCall}
           label="Calls (this month)"
-          value="0"
-          hint="Real data lands Phase 11"
+          value={stats.callsThisMonth.toLocaleString()}
+          hint={stats.callsThisMonth === 0 ? 'No calls yet this month.' : 'Across every channel.'}
         />
         <StatCard
           icon={Clock}
           label="Avg duration"
-          value="—"
-          hint="Per-call analytics in Phase 13"
+          value={
+            stats.avgDurationSeconds !== null
+              ? formatDurationShort(stats.avgDurationSeconds)
+              : '—'
+          }
+          hint={
+            stats.avgDurationSeconds !== null
+              ? 'Across completed calls.'
+              : 'Lands once a call completes.'
+          }
         />
         <StatCard
           icon={Gauge}
           label="Capture rate"
-          value="—"
-          hint="Booking & lead conversion"
+          value={
+            stats.captureRate !== null
+              ? `${Math.round(stats.captureRate * 100)}%`
+              : '—'
+          }
+          hint={
+            stats.captureRate !== null
+              ? `${stats.capturesThisMonth.toLocaleString()} captures total.`
+              : 'Booking & lead conversion.'
+          }
+          tone={
+            stats.captureRate !== null && stats.captureRate >= 0.4
+              ? 'good'
+              : stats.captureRate !== null && stats.captureRate < 0.2
+                ? 'warn'
+                : 'neutral'
+          }
         />
         <StatCard
           icon={agent.status === 'active' ? Check : AlertTriangle}
@@ -482,11 +512,15 @@ function OverviewTab({
           </Button>
         </CardHeader>
         <CardContent>
-          <EmptyState
-            icon={PhoneCall}
-            title="No calls yet"
-            description="When this agent answers calls, the last 5 will show up here."
-          />
+          {recentCalls.length === 0 ? (
+            <EmptyState
+              icon={PhoneCall}
+              title="No calls yet"
+              description="When this agent answers calls, the last 5 will show up here."
+            />
+          ) : (
+            <CallsTable items={recentCalls} activeStatus="all" hideTabs />
+          )}
         </CardContent>
       </Card>
     </>
@@ -604,6 +638,75 @@ function PublicLinkCard({ publicUrl }: { publicUrl: string }) {
       </CardContent>
     </Card>
   );
+}
+
+function AgentCallsTab({ calls }: { calls: CallListItem[] }) {
+  if (calls.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-0">
+          <EmptyState
+            icon={PhoneCall}
+            title="No calls yet"
+            description="When this agent answers a call, it appears here with its transcript, captures, and outcome."
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-sm font-medium">
+          {calls.length} {calls.length === 1 ? 'call' : 'calls'}
+        </CardTitle>
+        <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-xs">
+          <Link href="/dashboard/calls">All calls →</Link>
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <CallsTable items={calls} activeStatus="all" hideTabs />
+      </CardContent>
+    </Card>
+  );
+}
+
+function AgentCapturesTab({ captures }: { captures: CaptureListItem[] }) {
+  if (captures.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-0">
+          <EmptyState
+            icon={Inbox}
+            title="No captures yet"
+            description="Bookings, leads and callbacks the agent collects will appear here as conversations complete."
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-sm font-medium">
+          {captures.length} {captures.length === 1 ? 'capture' : 'captures'}
+        </CardTitle>
+        <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-xs">
+          <Link href="/dashboard/captures">All captures →</Link>
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <CapturesTable items={captures} activeType="all" />
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatDurationShort(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
 }
 
 function statusLabel(status: AgentStatus, elConnected: boolean): string {

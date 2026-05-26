@@ -40,9 +40,13 @@ const TABS = [
 export function CallsTable({
   items,
   activeStatus,
+  hideTabs = false,
 }: {
   items: CallListItem[];
   activeStatus: 'all' | CallStatus;
+  /** Hide the status filter tabs — used when the parent is showing a
+   *  pre-filtered subset (e.g. recent calls on the dashboard overview). */
+  hideTabs?: boolean;
 }) {
   const router = useRouter();
   const sp = useSearchParams();
@@ -56,19 +60,21 @@ export function CallsTable({
 
   return (
     <div className="space-y-4">
-      <Tabs value={activeStatus} onValueChange={onTabChange}>
-        <TabsList className="inline-flex h-auto min-w-max gap-1 rounded-xl border border-border/60 bg-card/40 p-1">
-          {TABS.map((t) => (
-            <TabsTrigger
-              key={t.key}
-              value={t.key}
-              className="data-[state=active]:bg-background data-[state=active]:shadow-sm"
-            >
-              {t.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      {hideTabs ? null : (
+        <Tabs value={activeStatus} onValueChange={onTabChange}>
+          <TabsList className="inline-flex h-auto min-w-max gap-1 rounded-xl border border-border/60 bg-card/40 p-1">
+            {TABS.map((t) => (
+              <TabsTrigger
+                key={t.key}
+                value={t.key}
+                className="data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
+                {t.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
 
       <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/40">
         <Table>

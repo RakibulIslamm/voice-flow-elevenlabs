@@ -12,12 +12,22 @@ import {
   type AgentTemplate,
   type AgentTonePreset,
 } from '@/lib/db/models/agent';
+import { Call, type CallDoc } from '@/lib/db/models/call';
+import {
+  Capture,
+  type CaptureDoc,
+  type CaptureStatus,
+  type CaptureType,
+} from '@/lib/db/models/capture';
 import { User, type ElevenLabsIntegration, type UserPlan } from '@/lib/db/models/user';
 import {
   AgentDetail,
   type AgentDetailContext,
   type AgentDetailData,
 } from '@/components/agents/agent-detail';
+import type { CallListItem } from '@/components/calls/calls-table';
+import type { CaptureListItem } from '@/components/captures/captures-table';
+import { loadAgentStats } from '@/lib/stats/dashboard-stats';
 import { env } from '@/lib/env';
 
 export const metadata = { title: 'Agent · VoiceFlow' };
@@ -56,6 +66,43 @@ export default async function AgentDetailPage({
 
   if (!agent || agent.userId.toString() !== userId) notFound();
 
+  const agentObjectId = new Types.ObjectId(id);
+
+  // Load stats + recent activity for the agent's own tabs. These are
+  // cheap counts/finds against indexed fields; running them in parallel
+  // keeps the page first-paint snappy even on Cold-start.
+  type LeanCall = Pick<
+    CallDoc,
+    | '_id'
+    | 'agentId'
+    | 'channel'
+    | 'status'
+    | 'startedAt'
+    | 'durationSeconds'
+    | 'outcome'
+    | 'createdAt'
+    | 'callerInfo'
+  >;
+  type LeanCapture = Pick<
+    CaptureDoc,
+    '_id' | 'callId' | 'agentId' | 'type' | 'status' | 'code' | 'data' | 'createdAt'
+  >;
+  const [stats, recentCalls, recentCaptures] = await Promise.all([
+    loadAgentStats(id),
+    Call.find({ agentId: agentObjectId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .select(
+        '_id agentId channel status startedAt durationSeconds outcome createdAt callerInfo',
+      )
+      .lean<LeanCall[]>(),
+    Capture.find({ agentId: agentObjectId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .select('_id callId agentId type status code data createdAt')
+      .lean<LeanCapture[]>(),
+  ]);
+
   const data: AgentDetailData = serialiseAgent(agent);
   const context: AgentDetailContext = {
     elConnected: !!user?.integrations?.elevenlabs?.enabled,
@@ -64,7 +111,47 @@ export default async function AgentDetailPage({
   };
   const appUrl = (env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
 
-  return <AgentDetail agent={data} context={context} appUrl={appUrl} />;
+  const callItems: CallListItem[] = recentCalls.map((c) => {
+    const caller = c.callerInfo as { phone?: string; originDomain?: string } | undefined;
+    return {
+      id: c._id.toString(),
+      agentId: c.agentId.toString(),
+      agentName: data.name,
+      businessName: data.businessName,
+      channel: c.channel,
+      status: c.status,
+      startedAtIso: (c.startedAt ?? c.createdAt).toISOString(),
+      durationSeconds: c.durationSeconds ?? null,
+      outcome: c.outcome ?? null,
+      callerLabel:
+        c.channel === 'phone'
+          ? caller?.phone ?? 'Phone caller'
+          : caller?.originDomain ?? 'Web caller',
+    };
+  });
+
+  const captureItems: CaptureListItem[] = recentCaptures.map((c) => ({
+    id: c._id.toString(),
+    type: c.type as CaptureType,
+    status: (c.status ?? 'confirmed') as CaptureStatus,
+    code: c.code ?? null,
+    data: c.data,
+    callId: c.callId.toString(),
+    agentName: data.name,
+    businessName: data.businessName,
+    createdAt: c.createdAt.toISOString(),
+  }));
+
+  return (
+    <AgentDetail
+      agent={data}
+      context={context}
+      appUrl={appUrl}
+      stats={stats}
+      calls={callItems}
+      captures={captureItems}
+    />
+  );
 }
 
 function serialiseAgent(
