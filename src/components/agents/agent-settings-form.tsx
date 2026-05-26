@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   AtSign,
   Building2,
+  CalendarClock,
   Check,
   ChevronDown,
   CircleDot,
@@ -124,6 +125,7 @@ type SectionKey =
   | 'status'
   | 'profile'
   | 'hours'
+  | 'booking'
   | 'voice'
   | 'prompt'
   | 'faq'
@@ -138,6 +140,7 @@ const SECTIONS: {
   { key: 'status', label: 'Status', hash: 'status', icon: CircleDot },
   { key: 'profile', label: 'Business profile', hash: 'profile', icon: Building2 },
   { key: 'hours', label: 'Business hours', hash: 'hours', icon: Clock },
+  { key: 'booking', label: 'Booking rules', hash: 'booking', icon: CalendarClock },
   { key: 'voice', label: 'Voice & personality', hash: 'voice', icon: Mic },
   { key: 'prompt', label: 'System prompt', hash: 'prompt', icon: Wand2 },
   { key: 'faq', label: 'Knowledge & FAQ', hash: 'faq', icon: MessageSquare },
@@ -175,6 +178,12 @@ export function AgentSettingsForm({
         businessWebsite?: string;
         businessTimezone?: string;
         businessHours?: BusinessHours;
+        bookingConfig?: {
+          slotDurationMinutes: number;
+          capacityPerSlot: number;
+          leadTimeMinutes: number;
+          maxDaysAhead: number;
+        };
         greeting?: string;
         systemPrompt?: string;
         tonePreset?: AgentTonePreset;
@@ -195,6 +204,7 @@ export function AgentSettingsForm({
         payload.businessTimezone = form.businessTimezone;
       if (!shallowEqualHours(form.businessHours, initial.businessHours))
         payload.businessHours = form.businessHours;
+      if (dirtyFields.has('bookingConfig')) payload.bookingConfig = form.bookingConfig;
       if (form.greeting !== initial.greeting) payload.greeting = form.greeting.trim();
       if (form.systemPrompt !== initial.systemPrompt)
         payload.systemPrompt = form.systemPrompt.trim();
@@ -265,6 +275,7 @@ export function AgentSettingsForm({
       dirtyFields.has('businessWebsite') ||
       dirtyFields.has('businessTimezone'),
     hours: dirtyFields.has('businessHours'),
+    booking: dirtyFields.has('bookingConfig'),
     voice:
       dirtyFields.has('tonePreset') ||
       dirtyFields.has('expressiveMode') ||
@@ -522,6 +533,89 @@ export function AgentSettingsForm({
                 </div>
               );
             })}
+          </div>
+        </Section>
+
+        {/* Booking rules */}
+        <Section
+          id="booking"
+          icon={CalendarClock}
+          accent="emerald"
+          title="Booking rules"
+          description="How the agent slices business hours into bookable slots and how many parties can land in the same slot."
+          dirty={sectionDirty.booking}
+        >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormRow label="Slot length">
+              <select
+                value={form.bookingConfig.slotDurationMinutes}
+                onChange={(e) =>
+                  update('bookingConfig', {
+                    ...form.bookingConfig,
+                    slotDurationMinutes: Number(e.target.value),
+                  })
+                }
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value={15}>15 minutes</option>
+                <option value={30}>30 minutes</option>
+                <option value={45}>45 minutes</option>
+                <option value={60}>60 minutes</option>
+                <option value={90}>90 minutes</option>
+                <option value={120}>120 minutes</option>
+              </select>
+            </FormRow>
+            <FormRow
+              label="Capacity per slot"
+              hint="How many bookings can share the same start time (e.g. 3 tables, 1 chair)."
+            >
+              <Input
+                type="number"
+                min={1}
+                max={50}
+                value={form.bookingConfig.capacityPerSlot}
+                onChange={(e) =>
+                  update('bookingConfig', {
+                    ...form.bookingConfig,
+                    capacityPerSlot: clampInt(e.target.value, 1, 50, 1),
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow
+              label="Lead time (minutes)"
+              hint="Earliest a slot can be booked from now. Set to 0 to allow same-minute bookings."
+            >
+              <Input
+                type="number"
+                min={0}
+                max={1440}
+                value={form.bookingConfig.leadTimeMinutes}
+                onChange={(e) =>
+                  update('bookingConfig', {
+                    ...form.bookingConfig,
+                    leadTimeMinutes: clampInt(e.target.value, 0, 1440, 0),
+                  })
+                }
+              />
+            </FormRow>
+            <FormRow
+              label="Max days ahead"
+              hint="How far into the future a booking can land. Guards against hallucinated dates."
+            >
+              <Input
+                type="number"
+                min={1}
+                max={365}
+                value={form.bookingConfig.maxDaysAhead}
+                onChange={(e) =>
+                  update('bookingConfig', {
+                    ...form.bookingConfig,
+                    maxDaysAhead: clampInt(e.target.value, 1, 365, 60),
+                  })
+                }
+              />
+            </FormRow>
           </div>
         </Section>
 
@@ -1330,6 +1424,14 @@ function diffFields(
   if (a.tonePreset !== b.tonePreset) out.add('tonePreset');
   if (a.expressiveMode !== b.expressiveMode) out.add('expressiveMode');
   if (!shallowEqualHours(a.businessHours, b.businessHours)) out.add('businessHours');
+  if (
+    a.bookingConfig.slotDurationMinutes !== b.bookingConfig.slotDurationMinutes ||
+    a.bookingConfig.capacityPerSlot !== b.bookingConfig.capacityPerSlot ||
+    a.bookingConfig.leadTimeMinutes !== b.bookingConfig.leadTimeMinutes ||
+    a.bookingConfig.maxDaysAhead !== b.bookingConfig.maxDaysAhead
+  ) {
+    out.add('bookingConfig');
+  }
   if (!shallowEqualFaq(a.faq, b.faq)) out.add('faq');
   return out;
 }
@@ -1343,12 +1445,27 @@ function hydrateForm(agent: AgentDetailData) {
     businessWebsite: agent.businessWebsite,
     businessTimezone: agent.businessTimezone,
     businessHours: normaliseHours(agent.businessHours),
+    bookingConfig: defaultBookingConfig(agent),
     greeting: agent.greeting,
     systemPrompt: agent.systemPrompt,
     tonePreset: agent.tonePreset,
     expressiveMode: agent.expressiveMode,
     faq: agent.faq.map((row) => ({ question: row.question, answer: row.answer })),
   };
+}
+
+// Defaults mirror the server-side `resolveBookingConfig` so what the user
+// sees in the form matches what the booking tools will actually use.
+function defaultBookingConfig(agent: AgentDetailData): {
+  slotDurationMinutes: number;
+  capacityPerSlot: number;
+  leadTimeMinutes: number;
+  maxDaysAhead: number;
+} {
+  if (agent.bookingConfig) return agent.bookingConfig;
+  return agent.template === 'restaurant'
+    ? { slotDurationMinutes: 30, capacityPerSlot: 3, leadTimeMinutes: 30, maxDaysAhead: 60 }
+    : { slotDurationMinutes: 30, capacityPerSlot: 1, leadTimeMinutes: 0, maxDaysAhead: 60 };
 }
 
 function normaliseHours(input: AgentDetailData['businessHours']): BusinessHours {
@@ -1359,6 +1476,14 @@ function normaliseHours(input: AgentDetailData['businessHours']): BusinessHours 
     if (d) out[key] = { open: d.open ?? '', close: d.close ?? '', closed: !!d.closed };
   }
   return out;
+}
+
+function clampInt(raw: string, min: number, max: number, fallback: number): number {
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return fallback;
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
 }
 
 function shallowEqualHours(a: BusinessHours, b: BusinessHours) {

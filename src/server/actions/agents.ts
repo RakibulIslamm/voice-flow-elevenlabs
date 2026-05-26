@@ -90,6 +90,15 @@ const businessHoursSchema = z
   })
   .optional();
 
+const bookingConfigSchema = z
+  .object({
+    slotDurationMinutes: z.number().int().min(5).max(240),
+    capacityPerSlot: z.number().int().min(1).max(50),
+    leadTimeMinutes: z.number().int().min(0).max(1440),
+    maxDaysAhead: z.number().int().min(1).max(365),
+  })
+  .optional();
+
 // Not exported — files with `'use server'` may only export async functions.
 // If the wizard ever needs to share the schema with the client, move it to
 // a sibling `agent-schemas.ts` without `'use server'`.
@@ -99,6 +108,7 @@ const createAgentInputSchema = z.object({
   businessName: z.string().trim().min(1).max(80),
   businessHours: businessHoursSchema,
   businessTimezone: z.string().trim().min(1).max(80).default('UTC'),
+  bookingConfig: bookingConfigSchema,
   location: z.string().trim().max(200).optional(),
   phone: z.string().trim().max(40).optional(),
   website: z.string().trim().max(200).url().optional().or(z.literal('').transform(() => undefined)),
@@ -204,6 +214,7 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
       businessWebsite: input.website,
       businessTimezone: input.businessTimezone,
       businessHours: input.businessHours,
+      bookingConfig: input.bookingConfig,
       faq: input.faq,
       elevenLabsAgentId,
       elevenLabsTools: toolRefs,
@@ -437,6 +448,7 @@ const updateAgentInputSchema = z.object({
     .or(z.literal('').transform(() => undefined)),
   businessTimezone: z.string().trim().min(1).max(80).optional(),
   businessHours: businessHoursSchema,
+  bookingConfig: bookingConfigSchema,
   faq: z.array(faqEntrySchema).max(100).optional(),
   // Voice / personality
   greeting: z.string().trim().min(1).max(200).optional(),
@@ -484,6 +496,7 @@ export const updateAgent = safeAction(updateAgentInputSchema, async (input) => {
   if (input.businessWebsite !== undefined) agent.businessWebsite = input.businessWebsite;
   if (input.businessTimezone !== undefined) agent.businessTimezone = input.businessTimezone;
   if (input.businessHours !== undefined) agent.businessHours = input.businessHours;
+  if (input.bookingConfig !== undefined) agent.bookingConfig = input.bookingConfig;
   if (input.faq !== undefined) agent.faq = input.faq;
   if (input.greeting !== undefined) agent.greeting = input.greeting;
   if (input.systemPrompt !== undefined) agent.systemPrompt = input.systemPrompt;

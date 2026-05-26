@@ -11,6 +11,8 @@ import { sendEmail } from '@/lib/email/resend';
 import { generateUniqueCaptureCode } from '@/lib/util/short-code';
 import { trackEvent } from '@/lib/tracking/event';
 import { logError } from '@/lib/tracking/log-error';
+import { isSlotFree, listAvailableSlots } from '@/lib/booking/availability';
+import { parseDateTimeInTimezone } from '@/lib/booking/time';
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -112,36 +114,6 @@ const sendConfirmationInput = z.object({
 // UTC boundary.
 // ---------------------------------------------------------------------------
 
-function parseDateTimeInTimezone(date: string, time: string | undefined, tz: string): Date | null {
-  const t = time && /^\d{1,2}:\d{2}/.test(time) ? time : '00:00';
-  // ISO-ish without offset, then resolve via the agent's IANA tz.
-  const iso = `${date}T${t.length === 4 ? '0' + t : t}:00`;
-  // Trick: build a Date as if the local string were UTC, then adjust for
-  // the difference between UTC and the target tz at that instant. Avoids
-  // pulling in a heavyweight tz library.
-  const asUtc = new Date(`${iso}Z`);
-  if (isNaN(asUtc.getTime())) return null;
-  const offsetMin = tzOffsetMinutes(asUtc, tz);
-  return new Date(asUtc.getTime() - offsetMin * 60_000);
-}
-
-function tzOffsetMinutes(at: Date, tz: string): number {
-  // Format the instant into the target tz, parse back, diff = offset.
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(at);
-  const get = (k: string) => Number(parts.find((p) => p.type === k)?.value ?? '0');
-  const local = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
-  return (local - at.getTime()) / 60_000;
-}
-
 function rejectIfPast(date: string, time: string | undefined, tz: string): ToolResponse | null {
   const resolved = parseDateTimeInTimezone(date, time, tz);
   if (!resolved) {
@@ -160,11 +132,6 @@ function rejectIfPast(date: string, time: string | undefined, tz: string): ToolR
 // Per-tool implementations
 // ---------------------------------------------------------------------------
 
-// In production this hooks into the user's calendar (Google/Outlook).
-// MVP returns plausible-looking mock slots so the agent can confirm
-// something to the caller and we can exercise the end-to-end flow.
-const MOCK_SLOTS = ['9:00 AM', '11:00 AM', '2:00 PM', '4:30 PM'];
-
 const checkAvailability: ToolHandler = async (raw, ctx) => {
   const input = checkAvailabilityInput.parse(raw);
   const tz = ctx.agent.businessTimezone || 'UTC';
@@ -173,7 +140,11 @@ const checkAvailability: ToolHandler = async (raw, ctx) => {
     await recordToolCall(ctx, 'check_availability', input, rejection);
     return rejection;
   }
-  const output = { available_slots: MOCK_SLOTS, date: input.date };
+  const result = await listAvailableSlots(ctx.agent, input.date);
+  const output =
+    result.status === 'open'
+      ? { available_slots: result.slots, date: input.date }
+      : { available_slots: [], date: input.date, message: result.message };
   await recordToolCall(ctx, 'check_availability', input, output);
   return output;
 };
@@ -185,6 +156,16 @@ const bookAppointment: ToolHandler = async (raw, ctx) => {
   if (rejection) {
     await recordToolCall(ctx, 'book_appointment', input, rejection);
     return rejection;
+  }
+  // Race-safe re-check — the availability snapshot the LLM saw can be
+  // seconds old; another caller could have grabbed this slot since.
+  if (!(await isSlotFree(ctx.agent, input.date, input.time))) {
+    const taken: ToolResponse = {
+      success: false,
+      error: 'That slot was just taken. Want me to suggest another time?',
+    };
+    await recordToolCall(ctx, 'book_appointment', input, taken);
+    return taken;
   }
 
   const code = await generateUniqueCaptureCode(ctx.user._id);
@@ -240,6 +221,14 @@ const bookReservation: ToolHandler = async (raw, ctx) => {
   if (rejection) {
     await recordToolCall(ctx, 'book_reservation', input, rejection);
     return rejection;
+  }
+  if (!(await isSlotFree(ctx.agent, input.date, input.time))) {
+    const taken: ToolResponse = {
+      success: false,
+      error: 'That slot was just taken. Want me to suggest another time?',
+    };
+    await recordToolCall(ctx, 'book_reservation', input, taken);
+    return taken;
   }
 
   const code = await generateUniqueCaptureCode(ctx.user._id);
@@ -556,6 +545,14 @@ const rescheduleBooking: ToolHandler = async (raw, ctx) => {
     };
     await recordToolCall(ctx, 'reschedule_booking', input, output);
     return output;
+  }
+  if (!(await isSlotFree(ctx.agent, input.new_date, input.new_time))) {
+    const taken: ToolResponse = {
+      success: false,
+      error: 'That new slot is no longer available. Want me to suggest another?',
+    };
+    await recordToolCall(ctx, 'reschedule_booking', input, taken);
+    return taken;
   }
 
   const data = { ...((capture.data as Record<string, unknown>) ?? {}) };

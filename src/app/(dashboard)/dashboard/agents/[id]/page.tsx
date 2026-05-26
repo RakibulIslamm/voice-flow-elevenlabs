@@ -167,6 +167,14 @@ function serialiseAgent(
     businessWebsite: doc.businessWebsite ?? '',
     businessTimezone: doc.businessTimezone || 'UTC',
     businessHours: (doc.businessHours ?? null) as AgentDetailData['businessHours'],
+    bookingConfig: doc.bookingConfig
+      ? {
+          slotDurationMinutes: doc.bookingConfig.slotDurationMinutes,
+          capacityPerSlot: doc.bookingConfig.capacityPerSlot,
+          leadTimeMinutes: doc.bookingConfig.leadTimeMinutes,
+          maxDaysAhead: doc.bookingConfig.maxDaysAhead,
+        }
+      : null,
     faq: (doc.faq ?? []) as AgentFaqEntry[],
     voiceId: doc.voiceId,
     greeting: doc.greeting ?? '',

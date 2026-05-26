@@ -64,8 +64,24 @@ export type AgentDoc = {
     browser: AgentBrowserChannel;
     phone: AgentPhoneChannel;
   };
+  /**
+   * Booking rules that drive the `check_availability` handler. Optional —
+   * the availability module falls back to sensible defaults when missing.
+   */
+  bookingConfig?: AgentBookingConfig;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type AgentBookingConfig = {
+  /** Length of one slot in minutes. Typical: 15 / 30 / 60. */
+  slotDurationMinutes: number;
+  /** Concurrent bookings allowed in the same slot (e.g. 3 tables/slot). */
+  capacityPerSlot: number;
+  /** Minutes from "now" before the next bookable slot — caller buffer. */
+  leadTimeMinutes: number;
+  /** Max days in the future a slot can be booked. Anti-spam guard. */
+  maxDaysAhead: number;
 };
 
 const faqEntrySchema = new Schema<AgentFaqEntry>(
@@ -98,6 +114,16 @@ const phoneChannelSchema = new Schema<AgentPhoneChannel>(
     enabled: { type: Boolean, default: false },
     twilioPhoneNumberSid: { type: String },
     twilioPhoneNumber: { type: String },
+  },
+  { _id: false },
+);
+
+const bookingConfigSchema = new Schema<AgentBookingConfig>(
+  {
+    slotDurationMinutes: { type: Number, default: 30, min: 5, max: 240 },
+    capacityPerSlot: { type: Number, default: 1, min: 1, max: 50 },
+    leadTimeMinutes: { type: Number, default: 0, min: 0, max: 1440 },
+    maxDaysAhead: { type: Number, default: 60, min: 1, max: 365 },
   },
   { _id: false },
 );
@@ -139,6 +165,7 @@ const agentSchema = new Schema<AgentDoc>(
       browser: { type: browserChannelSchema, required: true },
       phone: { type: phoneChannelSchema, default: () => ({ enabled: false }) },
     },
+    bookingConfig: { type: bookingConfigSchema },
   },
   { timestamps: true },
 );

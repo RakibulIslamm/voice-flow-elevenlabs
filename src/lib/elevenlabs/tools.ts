@@ -137,7 +137,7 @@ const TOOL_DEFINITIONS: Record<VoiceFlowToolName, () => VoiceFlowTool> = {
   check_availability: () => ({
     name: 'check_availability',
     description:
-      'Check whether the business has openings on a given date. Use this BEFORE confirming any booking.',
+      'Check whether the business has openings on a given date. Use this BEFORE confirming any booking. The returned `available_slots` are the ONLY times you may offer — do not invent times that are not in the list. If the response includes a `message` (e.g. closed day, fully booked, too far ahead), read that to the caller and ask for a different date.',
     parameters: {
       type: 'object',
       properties: {

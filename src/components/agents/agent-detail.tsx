@@ -97,6 +97,12 @@ export type AgentDetailData = {
   businessWebsite: string;
   businessTimezone: string;
   businessHours: Record<string, { open?: string; close?: string; closed: boolean }> | null;
+  bookingConfig: {
+    slotDurationMinutes: number;
+    capacityPerSlot: number;
+    leadTimeMinutes: number;
+    maxDaysAhead: number;
+  } | null;
   faq: AgentFaqEntry[];
   voiceId: string;
   greeting: string;
