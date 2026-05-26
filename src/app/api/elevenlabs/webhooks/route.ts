@@ -2,7 +2,7 @@ import 'server-only';
 import { NextResponse, after, type NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { Call, type TranscriptTurn } from '@/lib/db/models/call';
-import { User } from '@/lib/db/models/user';
+import { recordCallUsage } from '@/lib/usage/record-call-usage';
 import {
   verifyAndLoadContext,
   type HydratedAgent,
@@ -175,16 +175,11 @@ async function handlePostCallTranscription(ctx: {
 
   await call.save();
 
-  // 5. Atomic usage increment — Phase 13 will replace this with the
-  //    proper plan/minutes accounting; for now we count calls.
-  await User.updateOne(
-    { _id: ctx.user._id },
-    {
-      $inc: {
-        'usage.minutesUsedThisPeriod': Math.max(1, Math.round((call.durationSeconds ?? 0) / 60)),
-      },
-    },
-  ).catch(() => {});
+  // 5. Count this call toward the user's billing period and — if they're
+  //    on a paid plan and beyond included quota — fire a Stripe Meter
+  //    Event. `callId` doubles as the Stripe idempotency identifier so
+  //    a webhook retry never double-bills.
+  await recordCallUsage(ctx.user._id.toString(), call._id.toString());
 
   // 6. Kick off summary + email outside the request lifecycle so the
   //    webhook acks within ElevenLabs's timeout (~5s). `after()` runs

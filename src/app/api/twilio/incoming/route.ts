@@ -13,6 +13,7 @@ import {
 } from '@/lib/twilio/twiml';
 import { logError } from '@/lib/tracking/log-error';
 import { trackEvent } from '@/lib/tracking/event';
+import { checkCanStartCall } from '@/lib/usage/check-quota';
 
 /**
  * Twilio inbound voice webhook.
@@ -111,6 +112,19 @@ export async function POST(req: NextRequest): Promise<Response> {
       userId: agent.userId.toString(),
       agentId: agent._id.toString(),
       properties: { reason: unavailableReason, callerNumber: params.From },
+    });
+    return xmlResponse(buildUnavailableTwiml(), 200);
+  }
+
+  // Plan quota / past-due gate. We never let a phone call connect when
+  // the owner is out of quota or behind on payment — the call would just
+  // burn ElevenLabs credit without compensating revenue.
+  const quota = await checkCanStartCall(agent.userId.toString());
+  if (!quota.allowed) {
+    void trackEvent('call.phone_unavailable', {
+      userId: agent.userId.toString(),
+      agentId: agent._id.toString(),
+      properties: { reason: 'QUOTA_EXCEEDED', callerNumber: params.From },
     });
     return xmlResponse(buildUnavailableTwiml(), 200);
   }

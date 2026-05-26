@@ -112,16 +112,16 @@ export default async function DashboardOverviewPage() {
         />
         <StatCard
           icon={Gauge}
-          label="Voice minutes"
+          label="Calls used"
           hint={
-            stats.minutesQuota
-              ? `${formatMinutes(stats.minutesUsed)} / ${stats.minutesQuota.toLocaleString()} this period`
+            stats.callsQuota
+              ? `${stats.callsUsed.toLocaleString()} / ${stats.callsQuota.toLocaleString()} this period`
               : 'Unmetered plan'
           }
-          value={formatMinutes(stats.minutesUsed)}
+          value={stats.callsUsed.toLocaleString()}
           progress={
-            stats.minutesQuota
-              ? Math.min(100, (stats.minutesUsed / stats.minutesQuota) * 100)
+            stats.callsQuota
+              ? Math.min(100, (stats.callsUsed / stats.callsQuota) * 100)
               : null
           }
         />
@@ -242,9 +242,3 @@ function EmptyConversation() {
   );
 }
 
-function formatMinutes(m: number): string {
-  if (m === 0) return '0';
-  if (m < 1) return m.toFixed(1);
-  if (m < 10) return m.toFixed(1);
-  return Math.round(m).toLocaleString();
-}

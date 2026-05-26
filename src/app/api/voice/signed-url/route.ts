@@ -7,7 +7,7 @@ import { safeRoute } from '@/lib/safe-route';
 import { connectDb } from '@/lib/db/connect';
 import { Agent } from '@/lib/db/models/agent';
 import { Call } from '@/lib/db/models/call';
-import { User, type UserPlan } from '@/lib/db/models/user';
+import { User } from '@/lib/db/models/user';
 import { verifyWidgetToken } from '@/lib/widget/token';
 import { getSignedConversationUrl } from '@/lib/elevenlabs/agents';
 import {
@@ -18,17 +18,11 @@ import {
 } from '@/lib/errors';
 import { trackEvent } from '@/lib/tracking/event';
 import { getClientIp } from '@/lib/http/client-ip';
+import { checkCanStartCall } from '@/lib/usage/check-quota';
 
 const inputSchema = z.object({
   widgetToken: z.string().min(1),
 });
-
-// Phase-13 will replace this with the proper per-plan quota system.
-// For now: hard cap free-plan agents at 100 calls/calendar-month so a
-// single popular embed can't burn through an indefinite amount of
-// the owner's ElevenLabs credit without them noticing.
-const FREE_PLAN_MONTHLY_CALL_LIMIT = 100;
-const PAID_PLANS = new Set<UserPlan>(['starter', 'pro', 'business']);
 
 export const POST = safeRoute({
   schema: inputSchema,
@@ -64,11 +58,8 @@ export const POST = safeRoute({
 
     const userId = agent.userId.toString();
     const owner = await User.findById(userId)
-      .select('plan integrations.elevenlabs.enabled')
-      .lean<{
-        plan?: UserPlan;
-        integrations?: { elevenlabs?: { enabled?: boolean } };
-      } | null>();
+      .select('integrations.elevenlabs.enabled')
+      .lean<{ integrations?: { elevenlabs?: { enabled?: boolean } } } | null>();
     if (!owner?.integrations?.elevenlabs?.enabled) {
       throw new AppError({
         code: 'AGENT_UNAVAILABLE',
@@ -77,19 +68,13 @@ export const POST = safeRoute({
       });
     }
 
-    // Quota gate — placeholder until Phase 13's full plan system lands.
-    const plan = owner.plan ?? 'free';
-    if (!PAID_PLANS.has(plan)) {
-      const monthStart = startOfMonth(new Date());
-      const count = await Call.countDocuments({
-        userId: agent.userId,
-        createdAt: { $gte: monthStart },
-      });
-      if (count >= FREE_PLAN_MONTHLY_CALL_LIMIT) {
-        throw new QuotaExceededError(
-          'This agent has reached its monthly limit. Please contact the site owner.',
-        );
-      }
+    // Plan-aware call quota gate. Free users with included quota
+    // exhausted get blocked here; paid users with overage allowed pass
+    // through (with `willCharge` set on the check result, currently used
+    // for telemetry only — Stripe meter event fires post-call).
+    const quota = await checkCanStartCall(userId);
+    if (!quota.allowed) {
+      throw new QuotaExceededError(quota.reason);
     }
 
     // Provision a local Call doc up-front so transcript writes during the
@@ -140,6 +125,3 @@ export const POST = safeRoute({
   },
 });
 
-function startOfMonth(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
-}

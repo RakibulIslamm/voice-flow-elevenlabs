@@ -2,8 +2,16 @@ import { Schema, model, models, type Model, type Types } from 'mongoose';
 
 export type UserPlan = 'free' | 'starter' | 'pro' | 'business';
 
+/** Stripe subscription lifecycle mirror. `null` = no paid plan attached. */
+export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | null;
+
 export type UserUsage = {
-  minutesUsedThisPeriod: number;
+  /**
+   * Calls counted toward the user's billing period — incremented after the
+   * post-call webhook from ElevenLabs lands. Reset to 0 from the
+   * `invoice.paid` Stripe webhook when a new period begins.
+   */
+  callsThisPeriod: number;
   periodStart?: Date;
   periodEnd?: Date;
 };
@@ -65,6 +73,7 @@ export type UserDoc = {
   plan: UserPlan;
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
+  subscriptionStatus: SubscriptionStatus;
   usage: UserUsage;
   integrations: {
     elevenlabs: ElevenLabsIntegration;
@@ -76,7 +85,7 @@ export type UserDoc = {
 
 const usageSchema = new Schema<UserUsage>(
   {
-    minutesUsedThisPeriod: { type: Number, default: 0 },
+    callsThisPeriod: { type: Number, default: 0 },
     periodStart: { type: Date },
     periodEnd: { type: Date },
   },
@@ -132,7 +141,12 @@ const userSchema = new Schema<UserDoc>(
     },
     stripeCustomerId: { type: String, sparse: true, unique: true },
     stripeSubscriptionId: { type: String },
-    usage: { type: usageSchema, default: () => ({ minutesUsedThisPeriod: 0 }) },
+    subscriptionStatus: {
+      type: String,
+      enum: ['active', 'past_due', 'canceled', null] as const,
+      default: null,
+    },
+    usage: { type: usageSchema, default: () => ({ callsThisPeriod: 0 }) },
     integrations: {
       elevenlabs: {
         type: elevenLabsIntegrationSchema,

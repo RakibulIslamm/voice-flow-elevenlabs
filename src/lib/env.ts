@@ -29,6 +29,21 @@ const serverSchema = z.object({
   OPENROUTER_BASE_URL: z.url('OPENROUTER_BASE_URL must be a valid URL'),
   STRIPE_SECRET_KEY: z.string().min(1, 'STRIPE_SECRET_KEY is required'),
   STRIPE_WEBHOOK_SECRET: z.string().min(1, 'STRIPE_WEBHOOK_SECRET is required'),
+  // Per-plan recurring + metered overage price IDs. Stripe charges $0.005
+  // per call on the metered side across all paid tiers — value-add of
+  // higher tiers is included quota + features, not cheaper overage.
+  STRIPE_STARTER_PRICE_ID: z.string().min(1, 'STRIPE_STARTER_PRICE_ID is required'),
+  STRIPE_STARTER_OVERAGE_PRICE_ID: z
+    .string()
+    .min(1, 'STRIPE_STARTER_OVERAGE_PRICE_ID is required'),
+  STRIPE_PRO_PRICE_ID: z.string().min(1, 'STRIPE_PRO_PRICE_ID is required'),
+  STRIPE_PRO_OVERAGE_PRICE_ID: z
+    .string()
+    .min(1, 'STRIPE_PRO_OVERAGE_PRICE_ID is required'),
+  STRIPE_BUSINESS_PRICE_ID: z.string().min(1, 'STRIPE_BUSINESS_PRICE_ID is required'),
+  STRIPE_BUSINESS_OVERAGE_PRICE_ID: z
+    .string()
+    .min(1, 'STRIPE_BUSINESS_OVERAGE_PRICE_ID is required'),
   ENCRYPTION_KEY: z
     .string()
     .regex(/^[0-9a-f]{64}$/i, 'ENCRYPTION_KEY must be 64 hex characters (32 bytes)'),

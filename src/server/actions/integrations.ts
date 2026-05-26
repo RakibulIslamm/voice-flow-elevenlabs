@@ -14,6 +14,7 @@ import {
 } from '@/lib/db/models/user';
 import { Agent } from '@/lib/db/models/agent';
 import { encrypt } from '@/lib/crypto';
+import { checkPhoneAllowed } from '@/lib/usage/check-phone-allowed';
 import { env } from '@/lib/env';
 import {
   AppError,
@@ -251,13 +252,6 @@ export const disconnectElevenLabs = safeAction(noInput, async () => {
 // Twilio (Phase 12)
 // ---------------------------------------------------------------------------
 
-/**
- * Plans that may connect Twilio. Free + starter are gated behind the
- * paywall — the dialog hides the connect button in those cases too, but
- * we enforce server-side as defence-in-depth.
- */
-const PHONE_PLANS = new Set<UserDoc['plan']>(['pro', 'business']);
-
 const twilioConnectSchema = z.object({
   accountSid: z
     .string()
@@ -282,10 +276,9 @@ export const connectTwilio = safeAction(twilioConnectSchema, async ({ accountSid
   if (!user) {
     throw new InvalidCredentialError('VoiceFlow', 'Account not found.');
   }
-  if (!PHONE_PLANS.has(user.plan)) {
-    throw new QuotaExceededError(
-      'Phone calling requires Pro plan or above. Please upgrade in Billing.',
-    );
+  const phoneGate = await checkPhoneAllowed(userId);
+  if (!phoneGate.allowed) {
+    throw new QuotaExceededError(phoneGate.reason ?? 'Phone calling is not allowed on your plan.');
   }
 
   // Verify creds by hitting Twilio's Account.fetch endpoint. This is the

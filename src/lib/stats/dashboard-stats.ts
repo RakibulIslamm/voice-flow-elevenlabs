@@ -5,16 +5,21 @@ import { Agent } from '@/lib/db/models/agent';
 import { Call } from '@/lib/db/models/call';
 import { Capture } from '@/lib/db/models/capture';
 import { User, type UserDoc } from '@/lib/db/models/user';
+import { getPlan } from '@/lib/stripe/plans';
 
 export type DashboardStats = {
   activeAgents: number;
   totalAgents: number;
   callsThisMonth: number;
   capturesThisMonth: number;
-  /** Voice-minutes consumed in the current billing period (decimal). */
-  minutesUsed: number;
-  /** Plan's monthly voice-minute cap, or null for "unmetered". */
-  minutesQuota: number | null;
+  /** Calls counted toward the billing period (matches Stripe's view). */
+  callsUsed: number;
+  /** Plan's included call quota — `null` only for unmetered tiers. */
+  callsQuota: number | null;
+  /** Whether the plan allows charged overage beyond `callsQuota`. */
+  allowOverage: boolean;
+  /** Per-call overage rate in USD. 0 when overage is disallowed. */
+  overageRatePerCall: number;
 };
 
 /**
@@ -29,40 +34,33 @@ export async function loadDashboardStats(userId: string): Promise<DashboardStats
   const userObjectId = new Types.ObjectId(userId);
   const monthStart = startOfMonth();
 
-  // Run independent counts in parallel — these all hit different
-  // collections and Mongo serves them concurrently. Single round-trip
-  // latency dominates total query time on a small dataset.
-  const [activeAgents, totalAgents, callsThisMonth, capturesThisMonth, minuteAgg, userDoc] =
+  const [activeAgents, totalAgents, callsThisMonth, capturesThisMonth, userDoc] =
     await Promise.all([
       Agent.countDocuments({ userId: userObjectId, status: 'active' }),
       Agent.countDocuments({ userId: userObjectId }),
       Call.countDocuments({ userId: userObjectId, createdAt: { $gte: monthStart } }),
       Capture.countDocuments({ userId: userObjectId, createdAt: { $gte: monthStart } }),
-      Call.aggregate<{ totalSeconds: number }>([
-        {
-          $match: {
-            userId: userObjectId,
-            createdAt: { $gte: monthStart },
-            durationSeconds: { $gt: 0 },
-          },
-        },
-        { $group: { _id: null, totalSeconds: { $sum: '$durationSeconds' } } },
-      ]),
       User.findById(userId)
-        .select('plan')
-        .lean<Pick<UserDoc, '_id' | 'plan'> | null>(),
+        .select('plan usage')
+        .lean<Pick<UserDoc, '_id' | 'plan' | 'usage'> | null>(),
     ]);
 
-  const minutesUsed = minuteAgg.length > 0 ? minuteAgg[0]!.totalSeconds / 60 : 0;
-  const minutesQuota = quotaForPlan(userDoc?.plan ?? 'free');
+  const plan = getPlan(userDoc?.plan ?? 'free');
+  // We trust `usage.callsThisPeriod` (set by the post-call webhook + reset
+  // by `invoice.paid`) over the calendar-month aggregate — it's what
+  // Stripe will actually charge against.
+  const callsUsed = userDoc?.usage?.callsThisPeriod ?? 0;
+  const callsQuota = Number.isFinite(plan.includedCalls) ? plan.includedCalls : null;
 
   return {
     activeAgents,
     totalAgents,
     callsThisMonth,
     capturesThisMonth,
-    minutesUsed,
-    minutesQuota,
+    callsUsed,
+    callsQuota,
+    allowOverage: plan.allowOverage,
+    overageRatePerCall: plan.overageRatePerCall,
   };
 }
 
@@ -122,24 +120,4 @@ export async function loadAgentStats(agentId: string): Promise<AgentStats> {
 function startOfMonth(): Date {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), 1);
-}
-
-/**
- * Voice-minute allocations per plan. Returning `null` means "unmetered" —
- * we don't surface a usage bar in the UI for that case. Phase 13 reads
- * these from a billing config instead of hardcoding.
- */
-function quotaForPlan(plan: UserDoc['plan']): number | null {
-  switch (plan) {
-    case 'free':
-      return 100; // 100 minutes / month
-    case 'starter':
-      return 1000;
-    case 'pro':
-      return 5000;
-    case 'business':
-      return null; // unmetered
-    default:
-      return null;
-  }
 }

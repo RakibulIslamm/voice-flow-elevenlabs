@@ -15,6 +15,8 @@ import {
 } from '@/lib/errors';
 import { requireElevenLabsConnection } from '@/lib/elevenlabs/require';
 import { requireTwilioConnection } from '@/lib/twilio/require';
+import { checkCanCreateAgent } from '@/lib/usage/check-agent-limit';
+import { checkPhoneAllowed } from '@/lib/usage/check-phone-allowed';
 import {
   clearPhoneNumberWebhook,
   configurePhoneNumberWebhook,
@@ -137,8 +139,6 @@ const createAgentInputSchema = z.object({
 // inference at the call site is enough; nothing outside this file needs
 // the named type.
 
-const FREE_AGENT_LIMIT = 1;
-
 export const createAgent = safeAction(createAgentInputSchema, async (input) => {
   const session = await requireUser();
   const userId = session.user.id;
@@ -149,20 +149,19 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
 
   await connectDb();
 
-  // 1. Plan quota. Hardcoded here; Phase 13 swaps in real plan limits.
+  // 1. Plan-aware agent quota.
   const user = await User.findById(userId).select('plan email').lean<
     Pick<UserDoc, '_id' | 'email' | 'plan'> | null
   >();
   if (!user) {
     throw new QuotaExceededError('Account not found.');
   }
-  if (user.plan === 'free') {
-    const existing = await Agent.countDocuments({ userId });
-    if (existing >= FREE_AGENT_LIMIT) {
-      throw new QuotaExceededError(
-        'Free plan allows 1 agent. Upgrade to add more.',
-      );
-    }
+  const limit = await checkCanCreateAgent(userId);
+  if (!limit.allowed) {
+    const cap = Number.isFinite(limit.maxAllowed) ? limit.maxAllowed : '∞';
+    throw new QuotaExceededError(
+      `You've used all ${cap} agents on your plan. Upgrade to add more.`,
+    );
   }
 
   // 2. Ensure slug is unique (race-safe via the unique index on publicSlug).
@@ -901,8 +900,6 @@ export const resyncAgentSettings = safeAction(resyncSettingsInputSchema, async (
 // Phone channel (Phase 12)
 // ---------------------------------------------------------------------------
 
-const PHONE_PLANS = new Set<UserDoc['plan']>(['pro', 'business']);
-
 const phoneOptionsInputSchema = z.object({ agentId: objectIdSchema });
 
 /**
@@ -925,7 +922,8 @@ export const listPhoneChannelOptions = safeAction(phoneOptionsInputSchema, async
     .select('plan integrations.twilio.enabled')
     .lean<{ plan?: UserDoc['plan']; integrations?: { twilio?: { enabled?: boolean } } } | null>();
   const plan = user?.plan ?? 'free';
-  const planSupports = PHONE_PLANS.has(plan);
+  const phoneGate = await checkPhoneAllowed(userId);
+  const planSupports = phoneGate.allowed;
   const twilioConnected = !!user?.integrations?.twilio?.enabled;
 
   if (!planSupports || !twilioConnected) {
@@ -1015,10 +1013,9 @@ export const enablePhoneChannel = safeAction(enablePhoneInputSchema, async (inpu
   if (!user) {
     throw new QuotaExceededError('Account not found.');
   }
-  if (!PHONE_PLANS.has(user.plan)) {
-    throw new QuotaExceededError(
-      'Phone calling requires Pro plan or above. Please upgrade in Billing.',
-    );
+  const phoneGate = await checkPhoneAllowed(userId);
+  if (!phoneGate.allowed) {
+    throw new QuotaExceededError(phoneGate.reason ?? 'Phone calling is not allowed on your plan.');
   }
 
   await requireElevenLabsConnection(userId);
