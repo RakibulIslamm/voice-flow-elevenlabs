@@ -45,6 +45,12 @@ export type AgentConfig = {
   language?: string;
   /** 0-1; lower = more deterministic. Defaults to the SDK's default. */
   temperature?: number;
+  /**
+   * TTS model override. Pass `'eleven_v3_conversational'` to enable
+   * Expressive Mode (emotion-aware delivery). Omit to use the agent's
+   * existing model (ElevenLabs's default for new agents).
+   */
+  ttsModelId?: string;
 };
 
 export type CreateAgentResult = { agentId: string };
@@ -235,8 +241,11 @@ function buildSdkRequest(
 
   if (Object.keys(agentInner).length > 0) conversationConfig.agent = agentInner;
 
-  if (config.voiceId !== undefined) {
-    conversationConfig.tts = { voiceId: config.voiceId };
+  if (config.voiceId !== undefined || config.ttsModelId !== undefined) {
+    const tts: Record<string, unknown> = {};
+    if (config.voiceId !== undefined) tts.voiceId = config.voiceId;
+    if (config.ttsModelId !== undefined) tts.modelId = config.ttsModelId;
+    conversationConfig.tts = tts;
   }
 
   const body: Record<string, unknown> = {

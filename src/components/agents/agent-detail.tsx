@@ -87,6 +87,7 @@ export type AgentDetailData = {
   greeting: string;
   systemPrompt: string;
   tonePreset: AgentTonePreset;
+  expressiveMode: boolean;
   status: AgentStatus;
   channels: {
     browser: AgentBrowserChannel;

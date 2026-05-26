@@ -81,6 +81,7 @@ function serialiseAgent(
     greeting: doc.greeting ?? '',
     systemPrompt: doc.systemPrompt ?? '',
     tonePreset: doc.tonePreset as AgentTonePreset,
+    expressiveMode: doc.expressiveMode ?? false,
     status: doc.status as AgentStatus,
     channels: {
       browser: {

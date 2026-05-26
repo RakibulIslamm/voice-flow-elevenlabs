@@ -171,6 +171,7 @@ type WizardData = {
   greeting: string;
   voiceId: string;
   tonePreset: TonePreset;
+  expressiveMode: boolean;
   faq: { question: string; answer: string }[];
   systemPrompt: string;
   publicSlug: string;
@@ -189,6 +190,7 @@ const emptyData: WizardData = {
   greeting: '',
   voiceId: '',
   tonePreset: 'professional',
+  expressiveMode: false,
   faq: [],
   systemPrompt: '',
   publicSlug: '',
@@ -312,6 +314,7 @@ export function AgentWizard() {
         greeting: data.greeting,
         voiceId: data.voiceId,
         tonePreset: data.tonePreset,
+        expressiveMode: data.expressiveMode,
         faq: data.faq.filter((f) => f.question.trim() && f.answer.trim()),
         systemPrompt: data.systemPrompt,
         publicSlug: data.publicSlug,
@@ -935,6 +938,13 @@ function StepVoice({
               className="leading-relaxed"
             />
           </FieldGroup>
+        </div>
+
+        <div className="mt-5">
+          <ExpressiveModeToggle
+            checked={data.expressiveMode}
+            onChange={(v) => update({ expressiveMode: v })}
+          />
         </div>
       </SectionCard>
 
@@ -1632,6 +1642,57 @@ function Heading({
 function SectionCard({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-2xl border border-border/70 bg-card/40 p-5">{children}</div>
+  );
+}
+
+function ExpressiveModeToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={cn(
+        'flex w-full items-start gap-3 rounded-xl border bg-card/50 p-4 text-left transition',
+        checked
+          ? 'border-voice/60 ring-2 ring-voice/20'
+          : 'border-border/70 hover:border-voice/40',
+      )}
+    >
+      <div
+        className={cn(
+          'mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 transition',
+          checked ? 'bg-voice' : 'bg-muted',
+        )}
+      >
+        <span
+          className={cn(
+            'h-4 w-4 rounded-full bg-background shadow transition-transform',
+            checked ? 'translate-x-4' : 'translate-x-0',
+          )}
+        />
+      </div>
+      <div className="flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Expressive Mode</span>
+          <span className="rounded-full bg-voice/10 px-1.5 py-0.5 text-[10px] font-medium text-voice ring-1 ring-voice/20">
+            New
+          </span>
+        </div>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Emotion-aware delivery powered by{' '}
+          <code className="rounded bg-muted/60 px-1 py-0.5 font-mono text-[10px]">
+            eleven_v3_conversational
+          </code>
+          . Adapts tone and emphasis to how the caller sounds. Trade-off: doesn&apos;t fully
+          preserve Professional Voice Clones.
+        </p>
+      </div>
+    </button>
   );
 }
 

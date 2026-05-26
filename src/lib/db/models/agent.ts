@@ -50,6 +50,12 @@ export type AgentDoc = {
    */
   elevenLabsTools: AgentToolRef[];
   voiceId: string;
+  /**
+   * When true, the agent uses ElevenLabs's `eleven_v3_conversational`
+   * TTS model — emotion-aware, adapts tone/emphasis to caller affect.
+   * Trade-off: doesn't fully preserve Professional Voice Clones.
+   */
+  expressiveMode: boolean;
   greeting?: string;
   systemPrompt?: string;
   tonePreset: AgentTonePreset;
@@ -116,6 +122,7 @@ const agentSchema = new Schema<AgentDoc>(
     elevenLabsPhoneAgentId: { type: String, sparse: true, unique: true },
     elevenLabsTools: { type: [toolRefSchema], default: [] },
     voiceId: { type: String, required: true },
+    expressiveMode: { type: Boolean, default: false, required: true },
     greeting: { type: String },
     systemPrompt: { type: String },
     tonePreset: {

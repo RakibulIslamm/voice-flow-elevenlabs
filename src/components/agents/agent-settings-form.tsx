@@ -89,6 +89,7 @@ export function AgentSettingsForm({
         greeting?: string;
         systemPrompt?: string;
         tonePreset?: AgentTonePreset;
+        expressiveMode?: boolean;
         faq?: { question: string; answer: string }[];
       };
       const payload: UpdatePayload = { agentId: agent.id };
@@ -101,6 +102,8 @@ export function AgentSettingsForm({
       if (form.systemPrompt !== initial.systemPrompt)
         payload.systemPrompt = form.systemPrompt.trim();
       if (form.tonePreset !== initial.tonePreset) payload.tonePreset = form.tonePreset;
+      if (form.expressiveMode !== initial.expressiveMode)
+        payload.expressiveMode = form.expressiveMode;
       if (!shallowEqualFaq(form.faq, initial.faq))
         payload.faq = form.faq.filter((row) => row.question.trim() && row.answer.trim());
 
@@ -114,7 +117,9 @@ export function AgentSettingsForm({
       if (result.ok) {
         toast.success('Saved.', {
           description:
-            keys.some((k) => ['name', 'greeting', 'systemPrompt'].includes(k))
+            keys.some((k) =>
+              ['name', 'greeting', 'systemPrompt', 'expressiveMode'].includes(k),
+            )
               ? 'Changes synced to ElevenLabs.'
               : undefined,
         });
@@ -342,6 +347,32 @@ export function AgentSettingsForm({
             </div>
           </FormRow>
 
+          <FormRow label="Expressive Mode">
+            <div className="flex items-start justify-between gap-3 rounded-xl border border-border/70 bg-card/40 px-4 py-3">
+              <div className="flex-1">
+                <p className="text-sm font-medium">
+                  Emotion-aware delivery{' '}
+                  <span className="ml-1 rounded-full bg-voice/10 px-1.5 py-0.5 text-[10px] font-medium text-voice ring-1 ring-voice/20">
+                    New
+                  </span>
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Uses{' '}
+                  <code className="rounded bg-muted/60 px-1 py-0.5 font-mono text-[10px]">
+                    eleven_v3_conversational
+                  </code>{' '}
+                  — adapts tone and emphasis to caller emotion. Doesn&apos;t fully preserve
+                  Professional Voice Clones.
+                </p>
+              </div>
+              <Switch
+                checked={form.expressiveMode}
+                onCheckedChange={(v) => update('expressiveMode', v)}
+                aria-label="Toggle Expressive Mode"
+              />
+            </div>
+          </FormRow>
+
           <FormRow
             label="Greeting"
             trailing={<span className="text-xs text-muted-foreground">{form.greeting.length}/200</span>}
@@ -515,6 +546,7 @@ function hydrateForm(agent: AgentDetailData) {
     greeting: agent.greeting,
     systemPrompt: agent.systemPrompt,
     tonePreset: agent.tonePreset,
+    expressiveMode: agent.expressiveMode,
     faq: agent.faq.map((row) => ({ question: row.question, answer: row.answer })),
   };
 }
@@ -536,6 +568,7 @@ function shallowEqualForm(a: ReturnType<typeof hydrateForm>, b: ReturnType<typeo
     a.greeting === b.greeting &&
     a.systemPrompt === b.systemPrompt &&
     a.tonePreset === b.tonePreset &&
+    a.expressiveMode === b.expressiveMode &&
     shallowEqualHours(a.businessHours, b.businessHours) &&
     shallowEqualFaq(a.faq, b.faq)
   );

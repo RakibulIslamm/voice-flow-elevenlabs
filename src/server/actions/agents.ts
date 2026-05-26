@@ -32,6 +32,18 @@ import { logError } from '@/lib/tracking/log-error';
 const TEMPLATES = ['dental', 'restaurant', 'lead-qualifier', 'custom'] as const;
 const TONES = ['professional', 'friendly', 'casual'] as const;
 
+/**
+ * TTS model id ElevenLabs uses when Expressive Mode is enabled. Maps to
+ * `conversation_config.tts.model_id`. Passing `undefined` leaves whatever
+ * model the agent already has — important because ElevenLabs picks the
+ * workspace default at create time and we don't want to override it.
+ */
+const EXPRESSIVE_TTS_MODEL = 'eleven_v3_conversational';
+const STANDARD_TTS_MODEL = 'eleven_turbo_v2_5';
+function ttsModelFor(expressive: boolean): string {
+  return expressive ? EXPRESSIVE_TTS_MODEL : STANDARD_TTS_MODEL;
+}
+
 const faqEntrySchema = z.object({
   question: z.string().trim().min(1).max(300),
   answer: z.string().trim().min(1).max(2000),
@@ -80,6 +92,7 @@ const createAgentInputSchema = z.object({
   greeting: z.string().trim().min(1).max(200),
   voiceId: z.string().trim().min(1),
   tonePreset: z.enum(TONES),
+  expressiveMode: z.boolean().default(false),
   // Step 4
   faq: z.array(faqEntrySchema).max(100),
   // Step 5
@@ -155,6 +168,7 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
       llm: 'gemini-2.5-flash',
       toolIds,
       dynamicVariables: { business_timezone: input.businessTimezone },
+      ttsModelId: ttsModelFor(input.expressiveMode),
     });
     elevenLabsAgentId = res.agentId;
   } catch (e) {
@@ -179,6 +193,7 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
       elevenLabsAgentId,
       elevenLabsTools: toolRefs,
       voiceId: input.voiceId,
+      expressiveMode: input.expressiveMode,
       greeting: input.greeting,
       systemPrompt: input.systemPrompt,
       tonePreset: input.tonePreset,
@@ -411,6 +426,7 @@ const updateAgentInputSchema = z.object({
   greeting: z.string().trim().min(1).max(200).optional(),
   systemPrompt: z.string().trim().min(1).max(12_000).optional(),
   tonePreset: z.enum(TONES).optional(),
+  expressiveMode: z.boolean().optional(),
 });
 
 export const updateAgent = safeAction(updateAgentInputSchema, async (input) => {
@@ -437,6 +453,9 @@ export const updateAgent = safeAction(updateAgentInputSchema, async (input) => {
   if (input.businessTimezone !== undefined) {
     elPatch.dynamicVariables = { business_timezone: input.businessTimezone };
   }
+  if (input.expressiveMode !== undefined) {
+    elPatch.ttsModelId = ttsModelFor(input.expressiveMode);
+  }
 
   if (Object.keys(elPatch).length > 0) {
     await updateElevenLabsAgent(userId, agent.elevenLabsAgentId, elPatch);
@@ -453,6 +472,7 @@ export const updateAgent = safeAction(updateAgentInputSchema, async (input) => {
   if (input.greeting !== undefined) agent.greeting = input.greeting;
   if (input.systemPrompt !== undefined) agent.systemPrompt = input.systemPrompt;
   if (input.tonePreset !== undefined) agent.tonePreset = input.tonePreset;
+  if (input.expressiveMode !== undefined) agent.expressiveMode = input.expressiveMode;
 
   await agent.save();
 
@@ -821,6 +841,7 @@ export const resyncAgentSettings = safeAction(resyncSettingsInputSchema, async (
       systemPrompt: agent.systemPrompt,
       firstMessage: agent.greeting,
       dynamicVariables: { business_timezone: agent.businessTimezone || 'UTC' },
+      ttsModelId: ttsModelFor(agent.expressiveMode ?? false),
     });
   } catch (e) {
     void logError(e, {
