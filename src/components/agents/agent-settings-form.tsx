@@ -15,6 +15,7 @@ import {
   Globe2,
   IdCard,
   Info,
+  List,
   Loader2,
   MapPin,
   MessageSquare,
@@ -36,6 +37,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
@@ -547,23 +554,26 @@ export function AgentSettingsForm({
         >
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormRow label="Slot length">
-              <select
-                value={form.bookingConfig.slotDurationMinutes}
-                onChange={(e) =>
-                  update('bookingConfig', {
-                    ...form.bookingConfig,
-                    slotDurationMinutes: Number(e.target.value),
-                  })
-                }
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value={15}>15 minutes</option>
-                <option value={30}>30 minutes</option>
-                <option value={45}>45 minutes</option>
-                <option value={60}>60 minutes</option>
-                <option value={90}>90 minutes</option>
-                <option value={120}>120 minutes</option>
-              </select>
+              <div className="relative">
+                <select
+                  value={form.bookingConfig.slotDurationMinutes}
+                  onChange={(e) =>
+                    update('bookingConfig', {
+                      ...form.bookingConfig,
+                      slotDurationMinutes: Number(e.target.value),
+                    })
+                  }
+                  className="h-7 w-full appearance-none rounded-md border border-input bg-input/20 px-2 pr-8 py-0.5 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:text-xs/relaxed dark:bg-input/30"
+                >
+                  <option value={15}>15 minutes</option>
+                  <option value={30}>30 minutes</option>
+                  <option value={45}>45 minutes</option>
+                  <option value={60}>60 minutes</option>
+                  <option value={90}>90 minutes</option>
+                  <option value={120}>120 minutes</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              </div>
             </FormRow>
             <FormRow
               label="Capacity per slot"
@@ -580,6 +590,7 @@ export function AgentSettingsForm({
                     capacityPerSlot: clampInt(e.target.value, 1, 50, 1),
                   })
                 }
+                className={noSpinnerArrows}
               />
             </FormRow>
             <FormRow
@@ -597,6 +608,7 @@ export function AgentSettingsForm({
                     leadTimeMinutes: clampInt(e.target.value, 0, 1440, 0),
                   })
                 }
+                className={noSpinnerArrows}
               />
             </FormRow>
             <FormRow
@@ -607,6 +619,7 @@ export function AgentSettingsForm({
                 type="number"
                 min={1}
                 max={365}
+                className={noSpinnerArrows}
                 value={form.bookingConfig.maxDaysAhead}
                 onChange={(e) =>
                   update('bookingConfig', {
@@ -943,25 +956,57 @@ function SectionNavMobile({
 }: {
   sectionDirty: Record<SectionKey, boolean>;
 }) {
+  const dirtyCount = Object.values(sectionDirty).filter(Boolean).length;
   return (
-    <div className="-mx-2 overflow-x-auto px-2 lg:hidden">
-      <div className="flex min-w-max gap-1 rounded-xl border border-border/60 bg-card/40 p-1">
-        {SECTIONS.map((s) => {
-          const Icon = s.icon;
-          const isDirty = sectionDirty[s.key];
-          return (
-            <a
-              key={s.key}
-              href={`#${s.hash}`}
-              className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground"
-            >
-              <Icon className="size-3.5" />
-              {s.label}
-              {isDirty ? <span className="size-1.5 rounded-full bg-voice" /> : null}
-            </a>
-          );
-        })}
-      </div>
+    <div className="sticky top-16 z-30 -mx-2 px-2 lg:hidden">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="Jump to section"
+            className="flex h-11 w-full items-center justify-between rounded-xl border border-border/60 bg-card/80 px-3 text-sm font-medium shadow-sm backdrop-blur transition hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          >
+            <span className="inline-flex items-center gap-2">
+              <List className="size-4 text-muted-foreground" />
+              Jump to section
+            </span>
+            <span className="inline-flex items-center gap-2 text-muted-foreground">
+              {dirtyCount > 0 ? (
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-voice/15 px-1.5 text-[10px] font-medium text-voice">
+                  {dirtyCount}
+                </span>
+              ) : null}
+              <ChevronDown className="size-4" />
+            </span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          sideOffset={8}
+          className="w-[--radix-dropdown-menu-trigger-width] min-w-60"
+        >
+          {SECTIONS.map((s) => {
+            const Icon = s.icon;
+            const isDirty = sectionDirty[s.key];
+            return (
+              <DropdownMenuItem
+                key={s.key}
+                onSelect={() => {
+                  const el = document.getElementById(s.hash);
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                className="cursor-pointer"
+              >
+                <Icon className="size-3.5" />
+                {s.label}
+                {isDirty ? (
+                  <span className="ml-auto size-1.5 rounded-full bg-voice" />
+                ) : null}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -1477,6 +1522,12 @@ function normaliseHours(input: AgentDetailData['businessHours']): BusinessHours 
   }
   return out;
 }
+
+// Tailwind escape hatch to hide the native browser number-input spinner
+// arrows — they look heavier than every other input in the form and the
+// fields here have their own validation/clamping anyway.
+const noSpinnerArrows =
+  '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0';
 
 function clampInt(raw: string, min: number, max: number, fallback: number): number {
   const n = parseInt(raw, 10);

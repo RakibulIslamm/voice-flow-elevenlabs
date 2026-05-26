@@ -8,8 +8,10 @@ import {
   AlertTriangle,
   ArrowLeft,
   AudioLines,
+  BarChart3,
   Bot,
   Check,
+  ChevronDown,
   CircleDot,
   Clock,
   Code2,
@@ -18,6 +20,7 @@ import {
   Gauge,
   Globe2,
   Inbox,
+  Layers,
   Link2,
   Loader2,
   MapPin,
@@ -27,13 +30,21 @@ import {
   PhoneCall,
   Play,
   RefreshCw,
+  Settings2,
   ShieldCheck,
   Sparkle,
   Sparkles,
+  TestTube2,
   Trash2,
   Workflow,
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -82,6 +93,23 @@ import type { UserPlan } from '@/lib/db/models/user';
 import { reportClientError } from '@/lib/tracking/client-report';
 import { AgentSettingsForm } from './agent-settings-form';
 import { AgentChannelsForm } from './agent-channels-form';
+
+// Shared tab metadata so the mobile dropdown and the desktop pill-bar
+// stay in sync — adding a new tab is a one-line change here.
+const AGENT_DETAIL_TABS: {
+  value: string;
+  label: string;
+  icon: typeof Eye;
+}[] = [
+  { value: 'overview', label: 'Overview', icon: Eye },
+  { value: 'test', label: 'Test', icon: TestTube2 },
+  { value: 'embed', label: 'Embed', icon: Code2 },
+  { value: 'calls', label: 'Calls', icon: PhoneCall },
+  { value: 'captures', label: 'Captures', icon: Inbox },
+  { value: 'settings', label: 'Settings', icon: Settings2 },
+  { value: 'channels', label: 'Channels', icon: Layers },
+  { value: 'analytics', label: 'Analytics', icon: BarChart3 },
+];
 
 // ---------------------------------------------------------------------------
 // Public types — shared with the server page that hydrates this component.
@@ -165,16 +193,64 @@ export function AgentDetail({
       ) : null}
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-6">
-        <div className="-mx-2 overflow-x-auto px-2">
+        {/* Mobile: single dropdown trigger — no horizontal scroll, no native select. */}
+        <div className="sm:hidden">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Switch tab"
+                className="flex h-11 w-full items-center justify-between rounded-xl border border-border/60 bg-card/80 px-3 text-sm font-medium shadow-sm backdrop-blur transition hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              >
+                <span className="inline-flex items-center gap-2">
+                  {(() => {
+                    const active = AGENT_DETAIL_TABS.find((t) => t.value === tab);
+                    const Icon = active?.icon ?? Eye;
+                    return (
+                      <>
+                        <Icon className="size-4 text-muted-foreground" />
+                        {active?.label ?? 'Overview'}
+                      </>
+                    );
+                  })()}
+                </span>
+                <ChevronDown className="size-4 text-muted-foreground" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              sideOffset={8}
+              className="w-[--radix-dropdown-menu-trigger-width] min-w-56"
+            >
+              {AGENT_DETAIL_TABS.map((t) => {
+                const Icon = t.icon;
+                const active = t.value === tab;
+                return (
+                  <DropdownMenuItem
+                    key={t.value}
+                    onSelect={() => setTab(t.value)}
+                    data-active={active}
+                    className="cursor-pointer"
+                  >
+                    <Icon className="size-3.5" />
+                    {t.label}
+                    {active ? (
+                      <Check className="ml-auto size-3.5 text-muted-foreground" />
+                    ) : null}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* sm and up: the pill-bar tabs. min-w-max + overflow lets it scroll
+            only if the viewport is unexpectedly narrow for the tablet range. */}
+        <div className="-mx-2 hidden overflow-x-auto px-2 sm:block">
           <TabsList className="inline-flex h-auto min-w-max gap-1 rounded-xl border border-border/60 bg-card/40 p-1">
-            <TabTrigger value="overview" label="Overview" />
-            <TabTrigger value="test" label="Test" />
-            <TabTrigger value="embed" label="Embed" />
-            <TabTrigger value="calls" label="Calls" />
-            <TabTrigger value="captures" label="Captures" />
-            <TabTrigger value="settings" label="Settings" />
-            <TabTrigger value="channels" label="Channels" />
-            <TabTrigger value="analytics" label="Analytics" />
+            {AGENT_DETAIL_TABS.map((t) => (
+              <TabTrigger key={t.value} value={t.value} label={t.label} />
+            ))}
           </TabsList>
         </div>
 
