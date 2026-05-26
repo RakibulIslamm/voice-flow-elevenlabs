@@ -193,6 +193,7 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
       llm: 'gemini-2.5-flash',
       toolIds,
       dynamicVariables: { business_timezone: input.businessTimezone },
+      timezone: input.businessTimezone,
       ttsModelId: ttsModelFor(input.expressiveMode),
     });
     elevenLabsAgentId = res.agentId;
@@ -480,6 +481,7 @@ export const updateAgent = safeAction(updateAgentInputSchema, async (input) => {
   if (input.systemPrompt !== undefined) elPatch.systemPrompt = input.systemPrompt;
   if (input.businessTimezone !== undefined) {
     elPatch.dynamicVariables = { business_timezone: input.businessTimezone };
+    elPatch.timezone = input.businessTimezone;
   }
   if (input.expressiveMode !== undefined) {
     elPatch.ttsModelId = ttsModelFor(input.expressiveMode);
@@ -872,6 +874,7 @@ export const resyncAgentSettings = safeAction(resyncSettingsInputSchema, async (
       systemPrompt: agent.systemPrompt,
       firstMessage: agent.greeting,
       dynamicVariables: { business_timezone: agent.businessTimezone || 'UTC' },
+      timezone: agent.businessTimezone || 'UTC',
       ttsModelId: ttsModelFor(agent.expressiveMode ?? false),
     });
   } catch (e) {
@@ -1069,6 +1072,7 @@ export const enablePhoneChannel = safeAction(enablePhoneInputSchema, async (inpu
       llm: 'gemini-2.5-flash',
       toolIds: (agent.elevenLabsTools ?? []).map((t) => t.id),
       dynamicVariables: { business_timezone: agent.businessTimezone || 'UTC' },
+      timezone: agent.businessTimezone || 'UTC',
       // Phone agents must use turbo/flash v2 for English — see PHONE_TTS_MODEL.
       ttsModelId: PHONE_TTS_MODEL,
     };

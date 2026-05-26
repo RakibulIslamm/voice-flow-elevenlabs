@@ -43,6 +43,13 @@ export type AgentConfig = {
   dynamicVariables?: Record<string, string>;
   /** ISO 639-1 ASR/TTS language code. Defaults to 'en'. */
   language?: string;
+  /**
+   * IANA timezone string written to the SDK's native `prompt.timezone`
+   * field. ElevenLabs uses it to ground the agent's internal
+   * date/time reasoning AND to display the timezone in the dashboard —
+   * "No timezone set" appears when this isn't sent.
+   */
+  timezone?: string;
   /** 0-1; lower = more deterministic. Defaults to the SDK's default. */
   temperature?: number;
   /**
@@ -216,11 +223,20 @@ function buildSdkRequest(
   if (config.language !== undefined) agentInner.language = config.language;
   else if (ctx.mode === 'create') agentInner.language = 'en';
 
-  if (config.systemPrompt !== undefined || config.llm !== undefined || config.toolIds) {
+  if (
+    config.systemPrompt !== undefined ||
+    config.llm !== undefined ||
+    config.toolIds ||
+    config.timezone !== undefined
+  ) {
     const prompt: Record<string, unknown> = {};
     if (config.systemPrompt !== undefined) prompt.prompt = config.systemPrompt;
     if (config.llm !== undefined) prompt.llm = config.llm;
     if (config.temperature !== undefined) prompt.temperature = config.temperature;
+    // Native field — drives the dashboard's "Timezone" display and the
+    // model's internal time grounding. Distinct from the `business_timezone`
+    // dynamic variable, which the prompt header reads via `{{...}}`.
+    if (config.timezone !== undefined) prompt.timezone = config.timezone;
     if (config.toolIds) {
       // Always send the array (even empty) so an update can clear stale
       // toolIds — omitting the field would leave the previous list intact
