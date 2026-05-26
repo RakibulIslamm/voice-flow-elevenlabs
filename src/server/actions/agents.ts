@@ -51,11 +51,13 @@ const STANDARD_TTS_MODEL = 'eleven_turbo_v2_5';
 function ttsModelFor(expressive: boolean): string {
   return expressive ? EXPRESSIVE_TTS_MODEL : STANDARD_TTS_MODEL;
 }
-// Phone agents bridge through Twilio Media Streams. ElevenLabs rejects
-// English phone agents that use the v3 conversational model — they must
-// use turbo or flash v2. Expressive Mode therefore only applies to the
-// browser-facing agent; the phone-side twin always runs Standard.
-const PHONE_TTS_MODEL = STANDARD_TTS_MODEL;
+// Phone agents bridge through Twilio Media Streams. ElevenLabs strictly
+// requires English phone agents to use exactly `eleven_turbo_v2` or
+// `eleven_flash_v2` — NOT the v2.5 variants (those are treated as a
+// separate model family by their validator) and NOT v3 conversational.
+// Expressive Mode therefore only applies to the browser-facing agent;
+// the phone-side twin always runs plain turbo v2.
+const PHONE_TTS_MODEL = 'eleven_turbo_v2';
 
 const faqEntrySchema = z.object({
   question: z.string().trim().min(1).max(300),
