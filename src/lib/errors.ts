@@ -61,15 +61,28 @@ export class RateLimitError extends AppError {
   }
 }
 
+/**
+ * `reason` is the technical detail (always logged, never shown to users in
+ * production). `publicMessage` is an optional user-facing override; without
+ * it we fall back to the generic "temporarily unavailable" copy. In dev we
+ * append the reason to the toast so engineers see the actual cause without
+ * digging through the server log.
+ */
 export class ExternalServiceError extends AppError {
   readonly service: string;
-  constructor(service: string, message?: string) {
+  constructor(service: string, reason?: string, publicMessage?: string) {
+    const safePublic =
+      publicMessage ?? `${service} is temporarily unavailable. Please try again.`;
+    const userFacing =
+      process.env.NODE_ENV === 'development' && reason
+        ? `${safePublic} [dev: ${reason}]`
+        : safePublic;
     super({
       code: 'EXTERNAL_SERVICE_ERROR',
       statusCode: 502,
-      publicMessage: `${service} is temporarily unavailable. Please try again.`,
-      message: message ?? `${service} request failed`,
-      meta: { service },
+      publicMessage: userFacing,
+      message: reason ?? `${service} request failed`,
+      meta: { service, reason },
     });
     this.service = service;
   }

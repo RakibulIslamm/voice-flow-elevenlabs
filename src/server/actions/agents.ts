@@ -51,6 +51,11 @@ const STANDARD_TTS_MODEL = 'eleven_turbo_v2_5';
 function ttsModelFor(expressive: boolean): string {
   return expressive ? EXPRESSIVE_TTS_MODEL : STANDARD_TTS_MODEL;
 }
+// Phone agents bridge through Twilio Media Streams. ElevenLabs rejects
+// English phone agents that use the v3 conversational model — they must
+// use turbo or flash v2. Expressive Mode therefore only applies to the
+// browser-facing agent; the phone-side twin always runs Standard.
+const PHONE_TTS_MODEL = STANDARD_TTS_MODEL;
 
 const faqEntrySchema = z.object({
   question: z.string().trim().min(1).max(300),
@@ -249,7 +254,8 @@ export const createAgent = safeAction(createAgentInputSchema, async (input) => {
 
     throw new ExternalServiceError(
       'VoiceFlow',
-      'We provisioned your agent on ElevenLabs but couldn\'t save it. Please try again.',
+      undefined,
+      "We provisioned your agent on ElevenLabs but couldn't save it. Please try again.",
     );
   }
 });
@@ -781,6 +787,7 @@ export const resyncAgentTools = safeAction(resyncToolsInputSchema, async (input)
     });
     throw new ExternalServiceError(
       'ElevenLabs',
+      e instanceof Error ? e.message : undefined,
       'Failed to sync tool resources. Please try again.',
     );
   }
@@ -799,6 +806,7 @@ export const resyncAgentTools = safeAction(resyncToolsInputSchema, async (input)
     });
     throw new ExternalServiceError(
       'ElevenLabs',
+      e instanceof Error ? e.message : undefined,
       'Failed to re-sync tool configuration. Please try again.',
     );
   }
@@ -858,6 +866,7 @@ export const resyncAgentSettings = safeAction(resyncSettingsInputSchema, async (
     });
     throw new ExternalServiceError(
       'ElevenLabs',
+      e instanceof Error ? e.message : undefined,
       'Failed to re-sync agent settings. Please try again.',
     );
   }
@@ -1045,7 +1054,8 @@ export const enablePhoneChannel = safeAction(enablePhoneInputSchema, async (inpu
       llm: 'gemini-2.5-flash',
       toolIds: (agent.elevenLabsTools ?? []).map((t) => t.id),
       dynamicVariables: { business_timezone: agent.businessTimezone || 'UTC' },
-      ttsModelId: ttsModelFor(agent.expressiveMode ?? false),
+      // Phone agents must use turbo/flash v2 for English — see PHONE_TTS_MODEL.
+      ttsModelId: PHONE_TTS_MODEL,
     };
     try {
       const { agentId: phoneAgentId } = await createElevenLabsAgent(userId, phoneConfig);
@@ -1054,6 +1064,7 @@ export const enablePhoneChannel = safeAction(enablePhoneInputSchema, async (inpu
       void logError(e, { scope: 'enablePhoneChannel', stage: 'create-phone-agent', agentId: agent._id.toString() });
       throw new ExternalServiceError(
         'ElevenLabs',
+        e instanceof Error ? e.message : undefined,
         'Failed to create the phone-side agent in ElevenLabs. Please try again.',
       );
     }
@@ -1073,6 +1084,7 @@ export const enablePhoneChannel = safeAction(enablePhoneInputSchema, async (inpu
     void logError(e, { scope: 'enablePhoneChannel', stage: 'configure-webhook', agentId: agent._id.toString() });
     throw new ExternalServiceError(
       'Twilio',
+      e instanceof Error ? e.message : undefined,
       'Failed to configure the phone number webhook on Twilio. Please try again.',
     );
   }

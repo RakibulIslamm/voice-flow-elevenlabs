@@ -392,6 +392,31 @@ function pickSignedUrl(res: unknown): string | null {
 }
 
 function toExternalError(e: unknown, action: string): ExternalServiceError {
-  const message = e instanceof Error ? e.message : 'unknown error';
-  return new ExternalServiceError('ElevenLabs', `Failed to ${action}: ${message}`);
+  const reason = e instanceof Error ? e.message : 'unknown error';
+  return new ExternalServiceError('ElevenLabs', `Failed to ${action}: ${reason}`, hintFor(reason, action));
+}
+
+/**
+ * Maps known ElevenLabs error patterns to a user-friendly hint. We only
+ * surface a hint when we're confident the user can act on it — otherwise
+ * we let the generic "temporarily unavailable" copy stand (the technical
+ * detail still lands in the ErrorLog).
+ */
+function hintFor(reason: string, action: string): string | undefined {
+  if (/English Agents must use turbo or flash v2/i.test(reason)) {
+    return 'ElevenLabs requires English phone agents to use Standard mode (turbo/flash v2). Disable Expressive Mode or change the agent language.';
+  }
+  if (/voice_id|voice not found/i.test(reason)) {
+    return 'The selected voice is not available on your ElevenLabs account.';
+  }
+  if (/quota|character.*limit|usage.*exceeded/i.test(reason)) {
+    return 'Your ElevenLabs character quota is exhausted. Upgrade your ElevenLabs plan to continue.';
+  }
+  if (/invalid api key|unauthori[sz]ed|401|403/i.test(reason)) {
+    return 'Your ElevenLabs API key seems invalid or rotated. Reconnect from Integrations.';
+  }
+  // Fall through — no specific hint, the generic ExternalServiceError copy
+  // will be used. action is in the log already.
+  void action;
+  return undefined;
 }

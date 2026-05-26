@@ -50,6 +50,7 @@ export async function getUserTwilioCreds(userId: string): Promise<TwilioCreds> {
       e instanceof Error
         ? `Could not decrypt Twilio creds: ${e.message}`
         : 'Could not decrypt Twilio creds.',
+      'Your Twilio connection is corrupted. Please reconnect from Integrations.',
     );
   }
 }
@@ -112,6 +113,7 @@ export async function listUserPhoneNumbers(userId: string): Promise<UserPhoneNum
     throw new ExternalServiceError(
       'Twilio',
       e instanceof Error ? e.message : 'Failed to fetch phone numbers from Twilio.',
+      'Could not load your Twilio phone numbers. Please try again.',
     );
   }
 }
@@ -147,6 +149,7 @@ export async function configurePhoneNumberWebhook(
     throw new ExternalServiceError(
       'Twilio',
       e instanceof Error ? e.message : 'Failed to update Twilio phone number webhook.',
+      'Could not update the phone number webhook on Twilio. Please verify the number is still in your account and try again.',
     );
   }
 }

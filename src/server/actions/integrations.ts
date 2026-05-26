@@ -350,7 +350,8 @@ export const testTwilioConnection = safeAction(noInput, async () => {
     if (e instanceof InvalidCredentialError) throw e;
     throw new ExternalServiceError(
       'Twilio',
-      e instanceof Error ? e.message : 'Failed to reach Twilio.',
+      e instanceof Error ? e.message : undefined,
+      'Could not reach Twilio to verify your credentials. Please try again.',
     );
   }
 
@@ -503,7 +504,8 @@ async function verifyTwilioCreds(accountSid: string, authToken: string): Promise
     }
     throw new ExternalServiceError(
       'Twilio',
-      e instanceof Error ? e.message : 'Failed to reach Twilio.',
+      e instanceof Error ? e.message : undefined,
+      'Could not reach Twilio. Please try again.',
     );
   }
 }
@@ -548,7 +550,8 @@ async function verifyAndFetchAccount(apiKey: string): Promise<ElevenLabsAccountI
     }
     throw new ExternalServiceError(
       'ElevenLabs',
-      e instanceof Error ? e.message : 'Failed to reach ElevenLabs.',
+      e instanceof Error ? e.message : undefined,
+      'Could not reach ElevenLabs to verify your account. Please try again.',
     );
   }
 }
