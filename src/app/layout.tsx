@@ -3,6 +3,7 @@ import { Inter, Fraunces, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import '@/lib/env';
 import { cn } from '@/lib/utils';
+import { buildMetadata } from '@/lib/seo/metadata';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/toaster';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -31,11 +32,7 @@ const mono = JetBrains_Mono({
   display: 'swap',
 });
 
-export const metadata: Metadata = {
-  title: 'VoiceFlow — AI Voice Agents for Your Website & Phone',
-  description:
-    'Configure a custom AI voice agent for your business. Visitors talk to it in their browser or call your number — answered instantly, with human-like quality.',
-};
+export const metadata: Metadata = buildMetadata();
 
 export default function RootLayout({
   children,
@@ -45,7 +42,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={cn('h-full antialiased', sans.variable, serif.variable, mono.variable)}
+      className={cn('h-full scroll-smooth antialiased', sans.variable, serif.variable, mono.variable)}
       suppressHydrationWarning
     >
       <body suppressHydrationWarning className="min-h-full font-sans">

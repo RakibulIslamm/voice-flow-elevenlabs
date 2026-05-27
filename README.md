@@ -174,6 +174,23 @@ mongosh "<your-mongodb-uri>" --quiet --eval \
 Sign out and back in to refresh the JWT — the new `isAdmin: true` claim only takes
 effect on the next session. The `/admin` link then appears in the sidebar.
 
+## Landing page live demo
+
+The marketing landing page (`/`) embeds a real talk widget in the **Live demo** block.
+It loads `/talk/<slug>?embed=1` in an iframe, so it needs a real, public agent to point
+at. To enable it:
+
+1. Sign up for VoiceFlow on production.
+2. Connect your ElevenLabs account (Integrations → ElevenLabs).
+3. Create a "VoiceFlow Demo" agent with template = `dental`.
+4. Set its **allowed domains** to include your production domain (so the embed is permitted).
+5. Point the landing page at it — either set `NEXT_PUBLIC_DEMO_AGENT_SLUG` to the agent's
+   public slug, or edit the `DEMO_AGENT_SLUG` constant in
+   `src/components/marketing/demo-block.tsx`.
+
+Until that agent exists, the demo block still renders — the iframe just shows the widget's
+standard "unavailable" state. The rest of the landing page is unaffected.
+
 ## Architecture
 
 > Architecture diagram lands in Phase 15. Each phase adds one major capability — see project plan.

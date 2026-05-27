@@ -1,11 +1,14 @@
 import Link from 'next/link';
-import { Check, Phone, ShieldCheck, Sparkles, X } from 'lucide-react';
+import type { Metadata } from 'next';
+import { Check, Mic, Phone, ShieldCheck, SlidersHorizontal, Sparkles, X } from 'lucide-react';
+import { buildMetadata } from '@/lib/seo/metadata';
 
-export const metadata = {
+export const metadata: Metadata = buildMetadata({
   title: 'Pricing · VoiceFlow',
   description:
     'Bring-your-own-key AI voice agents. Predictable monthly platform fees + flat per-call overage. No voice or telecom markup.',
-};
+  path: '/pricing',
+});
 
 const TIERS = [
   {
@@ -138,6 +141,8 @@ export default function PricingPage() {
 
       <Callouts />
 
+      <Breakdown />
+
       <FeatureMatrix />
 
       <Faq />
@@ -173,6 +178,81 @@ function Callouts() {
         title="Flat overage"
         body="Every paid tier has the same $0.005/call overage. Higher tiers buy more included quota and features (phone, more agents), not a cheaper meter."
       />
+    </section>
+  );
+}
+
+function Breakdown() {
+  const parts = [
+    {
+      icon: SlidersHorizontal,
+      label: 'VoiceFlow',
+      sub: 'Platform · paid to us',
+      amount: '$19–149/mo',
+      highlight: true,
+    },
+    {
+      icon: Mic,
+      label: 'ElevenLabs',
+      sub: 'Voice · paid to them',
+      amount: '~$11–99/mo',
+    },
+    {
+      icon: Phone,
+      label: 'Twilio',
+      sub: 'Phone · paid to them (Pro+)',
+      amount: '~$15/mo',
+    },
+  ];
+  return (
+    <section className="mt-14">
+      <h2 className="font-serif text-2xl tracking-tight">Your total, broken down</h2>
+      <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+        Three separate, predictable bills — and we never mark up the other two. What you pay
+        ElevenLabs and Twilio, you pay them directly.
+      </p>
+      <div className="mt-6 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+        {parts.map((p, i) => {
+          const Icon = p.icon;
+          return (
+            <div key={p.label} className="flex flex-1 items-center gap-3 sm:flex-col sm:text-center">
+              <div
+                className={
+                  'flex flex-1 items-center gap-3 rounded-2xl border p-5 sm:w-full sm:flex-col ' +
+                  (p.highlight ? 'border-voice/40 bg-voice/5' : 'border-border/60 bg-card/40')
+                }
+              >
+                <span
+                  className={
+                    'grid size-10 place-items-center rounded-xl ' +
+                    (p.highlight ? 'bg-voice/15 text-voice' : 'bg-muted text-muted-foreground')
+                  }
+                >
+                  <Icon className="size-5" />
+                </span>
+                <div className="sm:mt-1">
+                  <p className="font-serif text-lg tracking-tight">{p.label}</p>
+                  <p className="text-xs text-muted-foreground">{p.sub}</p>
+                  <p className="mt-1 font-mono text-sm tabular-nums">{p.amount}</p>
+                </div>
+              </div>
+              {i < parts.length - 1 ? (
+                <span className="hidden text-2xl text-muted-foreground sm:inline" aria-hidden>
+                  +
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
+        <span className="hidden text-2xl text-muted-foreground sm:inline" aria-hidden>
+          =
+        </span>
+        <div className="flex-1 rounded-2xl border border-border/60 bg-card/40 p-5 text-center">
+          <p className="font-serif text-lg tracking-tight">Your total</p>
+          <p className="text-xs text-muted-foreground">All-in, at most</p>
+          <p className="mt-1 font-serif text-2xl tracking-tight text-voice">$30–260/mo</p>
+        </div>
+      </div>
     </section>
   );
 }
