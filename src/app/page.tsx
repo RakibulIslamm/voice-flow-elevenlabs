@@ -22,7 +22,7 @@ export default function HomePage() {
       <main className="flex-1">
         <Hero />
         <ByokSection />
-        <DemoBlock />
+        {/* <DemoBlock /> */}
         <WhySection />
         <HowSection />
         <UseCasesSection />

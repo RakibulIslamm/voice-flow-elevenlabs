@@ -55,7 +55,7 @@ export function MarketingFooter() {
             </p>
             <div className="flex items-center gap-3 pt-1">
               <a
-                href="https://github.com/RakibulIslam"
+                href="https://github.com/RakibulIslamm/voice-flow-elevenlabs"
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="GitHub"
@@ -64,7 +64,7 @@ export function MarketingFooter() {
                 <GithubIcon className="size-5" />
               </a>
               <a
-                href="https://www.linkedin.com/in/rakibulislam"
+                href="https://www.linkedin.com/in/d-rakibul-islam/"
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="LinkedIn"

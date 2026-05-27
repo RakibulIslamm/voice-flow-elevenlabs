@@ -52,10 +52,6 @@ export function Hero() {
               <Sparkles className="size-4" />
               Start free
             </CtaLink>
-            <CtaLink href="#demo" variant="secondary" className="w-full sm:w-auto">
-              <PhoneCall className="size-4" />
-              Listen to a demo
-            </CtaLink>
           </div>
           <p className="text-xs text-muted-foreground">
             100 free platform calls · No credit card · BYOK ElevenLabs
