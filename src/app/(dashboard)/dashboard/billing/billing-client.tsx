@@ -15,16 +15,34 @@ import {
   Phone,
   Sparkles,
   Users,
+  X,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import type { UserPlan, SubscriptionStatus } from '@/lib/db/models/user';
 
 export type BillingViewModel = {
   currentPlanKey: UserPlan;
   subscriptionStatus: SubscriptionStatus;
+  /**
+   * Stripe `cancel_at_period_end` mirror. When true the subscription is
+   * still `active` (and the user still gets paid features) but it will
+   * auto-cancel at `periodEnd` — drives "Cancels …" copy.
+   */
+  cancelAtPeriodEnd: boolean;
   hasStripeCustomer: boolean;
   callsUsed: number;
   callsIncluded: number;
@@ -82,6 +100,16 @@ function CurrentPlanCard({ view }: { view: BillingViewModel }) {
   // manually set without going through checkout) the pill is noise.
   const statusBadge = (() => {
     if (!view.hasStripeCustomer) return null;
+    // A cancel_at_period_end subscription is still Stripe-active but the
+    // user has signalled intent to leave — call it out explicitly so
+    // "Active" doesn't mislead them into thinking the cancel failed.
+    if (view.subscriptionStatus === 'active' && view.cancelAtPeriodEnd) {
+      return (
+        <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300">
+          Canceling
+        </Badge>
+      );
+    }
     switch (view.subscriptionStatus) {
       case 'active':
         return (
@@ -98,13 +126,30 @@ function CurrentPlanCard({ view }: { view: BillingViewModel }) {
     }
   })();
 
-  // CTA logic — three states:
-  //   1. Has a Stripe customer → portal (manage existing subscription).
-  //   2. On Free, Starter price is configured → "Upgrade to Starter".
-  //   3. On a paid plan but no Stripe customer (e.g. ops manually flipped
-  //      the doc) → "Subscribe to {plan}" so they can actually pay for it.
+  // CTA logic — four states:
+  //   1. Has a Stripe customer AND an active sub → portal + "Cancel now"
+  //      (the "Cancel" inside the portal does cancel-at-period-end by
+  //       default; we offer a separate immediate cancel for users who
+  //       want it gone right away).
+  //   2. Has a Stripe customer but no active sub → portal only.
+  //   3. Free with Starter price configured → "Upgrade to Starter".
+  //   4. On a paid plan but no Stripe customer (ops manually flipped the
+  //      doc) → "Subscribe to {plan}".
+  const hasActiveSub =
+    view.subscriptionStatus === 'active' || view.subscriptionStatus === 'past_due';
   const cta = (() => {
-    if (view.hasStripeCustomer) return <PortalButton />;
+    if (view.hasStripeCustomer) {
+      return (
+        <>
+          <PortalButton />
+          {hasActiveSub && view.cancelAtPeriodEnd ? (
+            <ResumeSubscriptionButton />
+          ) : hasActiveSub ? (
+            <CancelSubscriptionButton />
+          ) : null}
+        </>
+      );
+    }
     if (!isPaid) {
       const starter = view.plans.find((p) => p.key === 'starter');
       if (starter?.canCheckout) {
@@ -149,7 +194,13 @@ function CurrentPlanCard({ view }: { view: BillingViewModel }) {
             {statusBadge}
             {view.periodEnd ? (
               <span className="text-xs text-muted-foreground">
-                Renews {formatDate(view.periodEnd)}
+                {view.cancelAtPeriodEnd ? 'Cancels' : 'Renews'}{' '}
+                {formatDate(view.periodEnd)}
+                {view.cancelAtPeriodEnd ? (
+                  <span className="ml-1 text-amber-700 dark:text-amber-300">
+                    · {formatDaysRemaining(view.periodEnd)}
+                  </span>
+                ) : null}
               </span>
             ) : null}
           </div>
@@ -446,6 +497,93 @@ function CheckoutButton({
   );
 }
 
+function CancelSubscriptionButton() {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  function onConfirm() {
+    startTransition(async () => {
+      try {
+        const res = await fetch('/api/stripe/cancel', { method: 'POST' });
+        const data = (await res.json()) as { ok?: boolean; error?: { message?: string } };
+        if (!res.ok || !data.ok) {
+          toast.error(data.error?.message ?? 'Could not cancel your subscription.');
+          return;
+        }
+        toast.success('Cancellation scheduled. Plan stays active until the period ends.');
+        router.refresh();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Could not cancel your subscription.');
+      }
+    });
+  }
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive">
+          <X className="size-3.5" />
+          Cancel subscription
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Cancel at end of billing period?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Your plan stays active until the current period ends, then reverts to Free.
+            You can resume the subscription any time before then.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending}>Keep subscription</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault();
+              onConfirm();
+            }}
+            disabled={pending}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+            Yes, cancel at period end
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function ResumeSubscriptionButton() {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  function onClick() {
+    startTransition(async () => {
+      try {
+        const res = await fetch('/api/stripe/resume', { method: 'POST' });
+        const data = (await res.json()) as { ok?: boolean; error?: { message?: string } };
+        if (!res.ok || !data.ok) {
+          toast.error(data.error?.message ?? 'Could not resume your subscription.');
+          return;
+        }
+        toast.success('Subscription resumed. Your plan will keep renewing.');
+        router.refresh();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Could not resume your subscription.');
+      }
+    });
+  }
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      disabled={pending}
+      className="border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+    >
+      {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+      Resume subscription
+    </Button>
+  );
+}
+
 function PortalButton({
   variant = 'outline',
 }: {
@@ -490,6 +628,16 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function formatDaysRemaining(iso: string): string {
+  const target = new Date(iso).getTime();
+  if (Number.isNaN(target)) return '';
+  const diffMs = target - Date.now();
+  if (diffMs <= 0) return 'ends today';
+  const days = Math.ceil(diffMs / 86_400_000);
+  if (days === 1) return '1 day remaining';
+  return `${days} days remaining`;
 }
 function formatAmount(amount: number, currency: string): string {
   return new Intl.NumberFormat(undefined, {

@@ -74,6 +74,13 @@ export type UserDoc = {
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
   subscriptionStatus: SubscriptionStatus;
+  /**
+   * Mirrors Stripe's `cancel_at_period_end` flag. Cancelling via the
+   * Customer Portal flips this to true but leaves `status: 'active'`
+   * until `periodEnd`, so the UI needs both signals to render the right
+   * copy ("Cancels …" vs "Renews …").
+   */
+  cancelAtPeriodEnd: boolean;
   usage: UserUsage;
   integrations: {
     elevenlabs: ElevenLabsIntegration;
@@ -146,6 +153,7 @@ const userSchema = new Schema<UserDoc>(
       enum: ['active', 'past_due', 'canceled', null] as const,
       default: null,
     },
+    cancelAtPeriodEnd: { type: Boolean, default: false },
     usage: { type: usageSchema, default: () => ({ callsThisPeriod: 0 }) },
     integrations: {
       elevenlabs: {

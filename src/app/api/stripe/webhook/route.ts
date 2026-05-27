@@ -125,6 +125,7 @@ async function handleCheckoutCompleted(event: Stripe.Event): Promise<void> {
         stripeCustomerId: customerId,
         stripeSubscriptionId: subscriptionId,
         subscriptionStatus: 'active' as SubscriptionStatus,
+        cancelAtPeriodEnd: !!subscription.cancel_at_period_end,
         'usage.callsThisPeriod': 0,
         'usage.periodStart': periodStart,
         'usage.periodEnd': periodEnd,
@@ -142,7 +143,7 @@ async function handleSubscriptionUpdated(event: Stripe.Event): Promise<void> {
   const subscription = event.data.object as Stripe.Subscription;
   const userId = await findUserIdForSubscription(subscription);
   if (!userId) return;
-  const { plan, status } = readSubscriptionContext(subscription);
+  const { plan, status, periodStart, periodEnd } = readSubscriptionContext(subscription);
 
   await User.updateOne(
     { _id: userId },
@@ -151,6 +152,13 @@ async function handleSubscriptionUpdated(event: Stripe.Event): Promise<void> {
         plan: plan ?? 'free',
         subscriptionStatus: status,
         stripeSubscriptionId: subscription.id,
+        // Cancel-at-period-end is the path the Customer Portal "cancel"
+        // button takes — the subscription stays `active` until the
+        // period ends. We mirror the flag so the UI can render the
+        // right copy ("Cancels …" instead of "Renews …").
+        cancelAtPeriodEnd: !!subscription.cancel_at_period_end,
+        ...(periodStart ? { 'usage.periodStart': periodStart } : {}),
+        ...(periodEnd ? { 'usage.periodEnd': periodEnd } : {}),
       },
     },
   );
@@ -167,6 +175,7 @@ async function handleSubscriptionDeleted(event: Stripe.Event): Promise<void> {
       $set: {
         plan: 'free',
         subscriptionStatus: 'canceled' as SubscriptionStatus,
+        cancelAtPeriodEnd: false,
       },
       $unset: { stripeSubscriptionId: 1 },
     },
