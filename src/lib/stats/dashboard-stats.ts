@@ -5,7 +5,7 @@ import { Agent } from '@/lib/db/models/agent';
 import { Call } from '@/lib/db/models/call';
 import { Capture } from '@/lib/db/models/capture';
 import { User, type UserDoc } from '@/lib/db/models/user';
-import { getPlan } from '@/lib/stripe/plans';
+import { getPlan } from '@/lib/billing/plans';
 
 export type DashboardStats = {
   activeAgents: number;

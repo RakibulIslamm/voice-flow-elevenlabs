@@ -73,6 +73,13 @@ export type UserDoc = {
   plan: UserPlan;
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
+  /**
+   * Polar IDs are populated when the unified billing routes operate
+   * against Polar (`POLAR_SDK=true`). Stripe IDs and Polar IDs coexist
+   * so an account can be migrated between providers without data loss.
+   */
+  polarCustomerId?: string;
+  polarSubscriptionId?: string;
   subscriptionStatus: SubscriptionStatus;
   /**
    * Mirrors Stripe's `cancel_at_period_end` flag. Cancelling via the
@@ -148,6 +155,8 @@ const userSchema = new Schema<UserDoc>(
     },
     stripeCustomerId: { type: String, sparse: true, unique: true },
     stripeSubscriptionId: { type: String },
+    polarCustomerId: { type: String, sparse: true, unique: true },
+    polarSubscriptionId: { type: String },
     subscriptionStatus: {
       type: String,
       enum: ['active', 'past_due', 'canceled', null] as const,

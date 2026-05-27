@@ -3,7 +3,7 @@ import { Types } from 'mongoose';
 import { connectDb } from '@/lib/db/connect';
 import { Agent } from '@/lib/db/models/agent';
 import { User, type UserDoc } from '@/lib/db/models/user';
-import { getPlan } from '@/lib/stripe/plans';
+import { getPlan } from '@/lib/billing/plans';
 
 export type AgentLimitCheck = {
   allowed: boolean;

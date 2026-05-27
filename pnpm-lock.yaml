@@ -29,6 +29,9 @@ importers:
       '@openrouter/ai-sdk-provider':
         specifier: ^2.9.0
         version: 2.9.0(ai@6.0.191(zod@4.4.3))(zod@4.4.3)
+      '@polar-sh/sdk':
+        specifier: ^0.47.1
+        version: 0.47.1
       '@react-email/components':
         specifier: ^1.0.12
         version: 1.0.12(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -979,6 +982,9 @@ packages:
 
   '@panva/hkdf@1.2.1':
     resolution: {integrity: sha512-6oclG6Y3PiDFcoyk8srjLfVKyMfVCKJ27JwNPViuXziFpmdz+MZnZN/aKY0JGXgYuO/VghU0jcOAZgWXZ1Dmrw==}
+
+  '@polar-sh/sdk@0.47.1':
+    resolution: {integrity: sha512-fkz7wPLbqfuDmY9LxuXpE2uP2TAV6J0q/YN5hJ4UBxpjbkB0hKM6c4R35N89t83dfzMlG6EOlqOn+Rd1T6XrJQ==}
 
   '@preact/preset-vite@2.10.5':
     resolution: {integrity: sha512-p0vJpxiVO7KWWazWny3LUZ+saXyZKWv6Ju0bYMWNJRp2YveufRPgSUB1C4MTqGJfz07EehMgfN+AJNwQy+w6Iw==}
@@ -5794,6 +5800,11 @@ snapshots:
   '@oxc-project/types@0.132.0': {}
 
   '@panva/hkdf@1.2.1': {}
+
+  '@polar-sh/sdk@0.47.1':
+    dependencies:
+      standardwebhooks: 1.0.0
+      zod: 4.4.3
 
   '@preact/preset-vite@2.10.5(@babel/core@7.29.0)(preact@10.29.2)(vite@8.0.14(@types/node@20.19.41)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3))':
     dependencies:

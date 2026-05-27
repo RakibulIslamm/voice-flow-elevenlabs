@@ -4,8 +4,8 @@ import type Stripe from 'stripe';
 import { connectDb } from '@/lib/db/connect';
 import { User, type UserPlan, type SubscriptionStatus } from '@/lib/db/models/user';
 import { BillingEvent } from '@/lib/db/models/billing-event';
-import { getStripe } from '@/lib/stripe/client';
-import { planFromPriceId } from '@/lib/stripe/plans';
+import { getStripe } from '@/lib/billing/stripe/client';
+import { planFromPriceId } from '@/lib/billing/plans';
 import { resetUsagePeriod } from '@/lib/usage/reset-period';
 import { sendEmail } from '@/lib/email/resend';
 import { env } from '@/lib/env';
@@ -27,6 +27,12 @@ import { trackEvent } from '@/lib/tracking/event';
  * anything over a few seconds as suspicious — keep the handler tight.
  */
 export async function POST(req: NextRequest): Promise<Response> {
+  // Hard gate — when POLAR_SDK is on, this route is dormant. Returning
+  // 404 (not 500) keeps the inactive provider invisible to scanners and
+  // prevents accidental side-effects if Stripe is still pointed at us.
+  if (env.POLAR_SDK) {
+    return new NextResponse('Not found', { status: 404 });
+  }
   if (!env.STRIPE_WEBHOOK_SECRET) {
     void logError(new Error('STRIPE_WEBHOOK_SECRET is not configured'), {
       scope: 'stripe-webhook',
@@ -219,7 +225,7 @@ async function handleInvoicePaymentFailed(event: Stripe.Event): Promise<void> {
       text: [
         'Hi,',
         '',
-        'Stripe could not process your latest VoiceFlow invoice. New calls have been paused until your billing is up to date.',
+        'We could not process your latest VoiceFlow invoice. New calls have been paused until your billing is up to date.',
         '',
         `Update your payment method here: ${baseUrl}/dashboard/billing`,
         '',

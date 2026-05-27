@@ -36,6 +36,8 @@ import type { UserPlan, SubscriptionStatus } from '@/lib/db/models/user';
 
 export type BillingViewModel = {
   currentPlanKey: UserPlan;
+  /** Active billing provider — drives copy in the portal label etc. */
+  provider: 'stripe' | 'polar';
   subscriptionStatus: SubscriptionStatus;
   /**
    * Stripe `cancel_at_period_end` mirror. When true the subscription is
@@ -43,11 +45,13 @@ export type BillingViewModel = {
    * auto-cancel at `periodEnd` — drives "Cancels …" copy.
    */
   cancelAtPeriodEnd: boolean;
-  hasStripeCustomer: boolean;
+  hasBillingCustomer: boolean;
   callsUsed: number;
   callsIncluded: number;
   overageRatePerCall: number;
   allowOverage: boolean;
+  /** Current period boundaries (ISO). Used to compute prorated plan-switch amounts client-side. */
+  periodStart: string | null;
   periodEnd: string | null;
   agentCount: number;
   maxAgents: number | null;
@@ -95,13 +99,13 @@ export function BillingClient({ view }: { view: BillingViewModel }) {
 function CurrentPlanCard({ view }: { view: BillingViewModel }) {
   const current = view.plans.find((p) => p.key === view.currentPlanKey)!;
   const isPaid = current.priceUsd > 0;
-  // Only render the subscription-status pill when there's a Stripe
+  // Only render the subscription-status pill when there's a billing
   // customer attached. For free users (or for paid plans that were
   // manually set without going through checkout) the pill is noise.
   const statusBadge = (() => {
-    if (!view.hasStripeCustomer) return null;
-    // A cancel_at_period_end subscription is still Stripe-active but the
-    // user has signalled intent to leave — call it out explicitly so
+    if (!view.hasBillingCustomer) return null;
+    // A cancel_at_period_end subscription is still active but the user
+    // has signalled intent to leave — call it out explicitly so
     // "Active" doesn't mislead them into thinking the cancel failed.
     if (view.subscriptionStatus === 'active' && view.cancelAtPeriodEnd) {
       return (
@@ -127,18 +131,15 @@ function CurrentPlanCard({ view }: { view: BillingViewModel }) {
   })();
 
   // CTA logic — four states:
-  //   1. Has a Stripe customer AND an active sub → portal + "Cancel now"
-  //      (the "Cancel" inside the portal does cancel-at-period-end by
-  //       default; we offer a separate immediate cancel for users who
-  //       want it gone right away).
-  //   2. Has a Stripe customer but no active sub → portal only.
+  //   1. Has a billing customer AND an active sub → portal + Cancel/Resume.
+  //   2. Has a billing customer but no active sub → portal only.
   //   3. Free with Starter price configured → "Upgrade to Starter".
-  //   4. On a paid plan but no Stripe customer (ops manually flipped the
+  //   4. On a paid plan but no billing customer (ops manually flipped the
   //      doc) → "Subscribe to {plan}".
   const hasActiveSub =
     view.subscriptionStatus === 'active' || view.subscriptionStatus === 'past_due';
   const cta = (() => {
-    if (view.hasStripeCustomer) {
+    if (view.hasBillingCustomer) {
       return (
         <>
           <PortalButton />
@@ -303,7 +304,7 @@ function PastDueBanner({ view }: { view: BillingViewModel }) {
         <div className="space-y-2">
           <p className="text-sm font-medium text-destructive">Payment failed</p>
           <p className="text-xs text-muted-foreground">
-            Stripe could not charge your card. New calls are paused until your billing is up to date.
+            We could not charge your card. New calls are paused until your billing is up to date.
           </p>
           <PortalButton variant="destructive" />
         </div>
@@ -327,6 +328,12 @@ function PlanComparison({ view }: { view: BillingViewModel }) {
           {view.plans.map((p) => {
             const isCurrent = p.key === view.currentPlanKey;
             const isHighlight = p.key === 'pro';
+            const hasActiveSub =
+              view.hasBillingCustomer && view.subscriptionStatus === 'active';
+            const isUpgrade =
+              p.priceUsd >
+              (view.plans.find((x) => x.key === view.currentPlanKey)?.priceUsd ?? 0);
+            const ctaLabel = isUpgrade ? 'Upgrade' : 'Switch';
             return (
               <div
                 key={p.key}
@@ -377,17 +384,45 @@ function PlanComparison({ view }: { view: BillingViewModel }) {
                   <Button size="sm" variant="outline" disabled>
                     Free tier
                   </Button>
-                ) : p.canCheckout ? (
-                  <CheckoutButton plan={p.key as 'starter' | 'pro' | 'business'} variant="outline">
-                    {p.priceUsd >
-                    (view.plans.find((x) => x.key === view.currentPlanKey)?.priceUsd ?? 0)
-                      ? 'Upgrade'
-                      : 'Switch'}
-                  </CheckoutButton>
-                ) : (
+                ) : !p.canCheckout ? (
                   <Button size="sm" variant="outline" disabled>
                     Not configured
                   </Button>
+                ) : hasActiveSub && view.provider === 'stripe' ? (
+                  // Stripe: plan changes (and their proration preview) are
+                  // handled inside the Stripe Customer Portal. Opening a new
+                  // Checkout for an existing customer would create a second
+                  // subscription — so route to the portal instead.
+                  <PortalButton variant="outline" label={ctaLabel} />
+                ) : hasActiveSub && view.provider === 'polar' ? (
+                  // Polar: swap in place via subscriptions.update with a
+                  // client-computed proration confirmation (no preview API).
+                  <CheckoutButton
+                    plan={p.key as 'starter' | 'pro' | 'business'}
+                    variant="outline"
+                    swap={{
+                      currentPlanName:
+                        view.plans.find((x) => x.key === view.currentPlanKey)
+                          ?.displayName ?? 'Current plan',
+                      currentPriceUsd:
+                        view.plans.find((x) => x.key === view.currentPlanKey)
+                          ?.priceUsd ?? 0,
+                      targetPlanName: p.displayName,
+                      targetPriceUsd: p.priceUsd,
+                      periodStartIso: view.periodStart,
+                      periodEndIso: view.periodEnd,
+                    }}
+                  >
+                    {ctaLabel}
+                  </CheckoutButton>
+                ) : (
+                  // No active sub yet → straight to the provider's checkout.
+                  <CheckoutButton
+                    plan={p.key as 'starter' | 'pro' | 'business'}
+                    variant="outline"
+                  >
+                    {ctaLabel}
+                  </CheckoutButton>
                 )}
               </div>
             );
@@ -463,17 +498,31 @@ function CheckoutButton({
   plan,
   variant = 'default',
   children,
+  // When non-null, the click triggers an in-place plan swap (existing
+  // Polar/Stripe sub) which immediately bills the prorated difference.
+  // We compute the exact amount client-side from Polar's published
+  // formula (no preview API exists) and ask for explicit confirmation
+  // — the dialog ONLY appears in the swap case.
+  swap = null,
 }: {
   plan: 'starter' | 'pro' | 'business';
   variant?: 'default' | 'outline';
   children: React.ReactNode;
+  swap?: {
+    currentPlanName: string;
+    currentPriceUsd: number;
+    targetPlanName: string;
+    targetPriceUsd: number;
+    periodStartIso: string | null;
+    periodEndIso: string | null;
+  } | null;
 }) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  function onClick() {
+  function fire() {
     startTransition(async () => {
       try {
-        const res = await fetch('/api/stripe/checkout', {
+        const res = await fetch('/api/billing/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ plan }),
@@ -483,18 +532,138 @@ function CheckoutButton({
           toast.error(data.error?.message ?? 'Could not open checkout.');
           return;
         }
+        if (swap) {
+          toast.success(`Switched to ${swap.targetPlanName}.`);
+          router.refresh();
+          return;
+        }
         router.push(data.url);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Could not open checkout.');
       }
     });
   }
+  if (!swap) {
+    return (
+      <Button onClick={fire} variant={variant} size="sm" disabled={pending}>
+        {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+        {children}
+      </Button>
+    );
+  }
+  const proration = computeProration({
+    currentPriceUsd: swap.currentPriceUsd,
+    targetPriceUsd: swap.targetPriceUsd,
+    periodStartIso: swap.periodStartIso,
+    periodEndIso: swap.periodEndIso,
+  });
+  const isUpgrade = swap.targetPriceUsd > swap.currentPriceUsd;
   return (
-    <Button onClick={onClick} variant={variant} size="sm" disabled={pending}>
-      {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-      {children}
-    </Button>
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant={variant} size="sm" disabled={pending}>
+          {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+          {children}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {isUpgrade ? 'Upgrade' : 'Switch'} to {swap.targetPlanName} ($
+            {swap.targetPriceUsd}/mo)?
+          </AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-3 text-sm">
+              <p className="text-muted-foreground">
+                You're currently on <strong>{swap.currentPlanName}</strong> ($
+                {swap.currentPriceUsd}/mo). Your plan changes immediately.
+              </p>
+              <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Charged today (prorated)</span>
+                  <span className="font-mono tabular-nums font-medium">
+                    {proration.amountUsd >= 0 ? '$' : '-$'}
+                    {Math.abs(proration.amountUsd).toFixed(2)}
+                  </span>
+                </div>
+                {proration.daysRemaining != null ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    Covers the remaining {proration.daysRemaining} day
+                    {proration.daysRemaining === 1 ? '' : 's'} of your current billing period.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    Calculated as the price difference × time left in this period.
+                  </p>
+                )}
+                {proration.amountUsd < 0 ? (
+                  <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                    Downgrade — this credit applies on your next invoice.
+                  </p>
+                ) : null}
+              </div>
+              <p className="text-muted-foreground">
+                From your next renewal you'll be billed{' '}
+                <strong>${swap.targetPriceUsd}/mo</strong>.
+              </p>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault();
+              fire();
+            }}
+            disabled={pending}
+          >
+            {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+            {proration.amountUsd > 0
+              ? `Confirm — charge $${proration.amountUsd.toFixed(2)} now`
+              : 'Confirm switch'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
+}
+
+/**
+ * Polar's published proration formula (per-second basis):
+ *   credit_for_old = old_price * S / T
+ *   charge_for_new = new_price * S / T
+ *   diff = (new_price - old_price) * S / T
+ * Where S = seconds remaining in the current period, T = total period seconds.
+ *
+ * Returned amount is in USD (not cents). Negative = credit (downgrade).
+ * `daysRemaining` is rounded up for human-friendly copy; the actual
+ * charge Polar issues will use the exact per-second math.
+ */
+function computeProration(args: {
+  currentPriceUsd: number;
+  targetPriceUsd: number;
+  periodStartIso: string | null;
+  periodEndIso: string | null;
+}): { amountUsd: number; daysRemaining: number | null } {
+  const diffMonthly = args.targetPriceUsd - args.currentPriceUsd;
+  if (!args.periodStartIso || !args.periodEndIso) {
+    // Without dates we can't prorate — fall back to the full monthly
+    // diff as a conservative upper bound the user can still consent to.
+    return { amountUsd: diffMonthly, daysRemaining: null };
+  }
+  const start = new Date(args.periodStartIso).getTime();
+  const end = new Date(args.periodEndIso).getTime();
+  const now = Date.now();
+  const total = end - start;
+  const remaining = Math.max(0, end - now);
+  if (total <= 0 || Number.isNaN(total) || Number.isNaN(remaining)) {
+    return { amountUsd: diffMonthly, daysRemaining: null };
+  }
+  const fraction = remaining / total;
+  const amountUsd = Math.round(diffMonthly * fraction * 100) / 100;
+  const daysRemaining = Math.max(0, Math.ceil(remaining / 86_400_000));
+  return { amountUsd, daysRemaining };
 }
 
 function CancelSubscriptionButton() {
@@ -503,7 +672,7 @@ function CancelSubscriptionButton() {
   function onConfirm() {
     startTransition(async () => {
       try {
-        const res = await fetch('/api/stripe/cancel', { method: 'POST' });
+        const res = await fetch('/api/billing/cancel', { method: 'POST' });
         const data = (await res.json()) as { ok?: boolean; error?: { message?: string } };
         if (!res.ok || !data.ok) {
           toast.error(data.error?.message ?? 'Could not cancel your subscription.');
@@ -557,7 +726,7 @@ function ResumeSubscriptionButton() {
   function onClick() {
     startTransition(async () => {
       try {
-        const res = await fetch('/api/stripe/resume', { method: 'POST' });
+        const res = await fetch('/api/billing/resume', { method: 'POST' });
         const data = (await res.json()) as { ok?: boolean; error?: { message?: string } };
         if (!res.ok || !data.ok) {
           toast.error(data.error?.message ?? 'Could not resume your subscription.');
@@ -586,15 +755,17 @@ function ResumeSubscriptionButton() {
 
 function PortalButton({
   variant = 'outline',
+  label = 'Manage subscription',
 }: {
   variant?: 'default' | 'outline' | 'destructive';
+  label?: string;
 }) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   function onClick() {
     startTransition(async () => {
       try {
-        const res = await fetch('/api/stripe/portal', { method: 'POST' });
+        const res = await fetch('/api/billing/portal', { method: 'POST' });
         const data = (await res.json()) as { url?: string; error?: { message?: string } };
         if (!res.ok || !data.url) {
           toast.error(data.error?.message ?? 'Could not open the billing portal.');
@@ -609,7 +780,7 @@ function PortalButton({
   return (
     <Button onClick={onClick} variant={variant} size="sm" disabled={pending}>
       {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-      Manage subscription
+      {label}
     </Button>
   );
 }

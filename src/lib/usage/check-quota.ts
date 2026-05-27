@@ -1,7 +1,7 @@
 import 'server-only';
 import { connectDb } from '@/lib/db/connect';
 import { User, type UserDoc } from '@/lib/db/models/user';
-import { getPlan } from '@/lib/stripe/plans';
+import { getPlan } from '@/lib/billing/plans';
 
 export type CallQuotaCheck =
   | { allowed: true; willCharge?: number; remainingIncluded?: number }

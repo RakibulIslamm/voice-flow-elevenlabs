@@ -20,6 +20,11 @@ export type Plan = {
   priceId: string | null;
   /** Stripe metered price ID for per-call overage. `null` on the free tier. */
   overagePriceId: string | null;
+  /**
+   * Polar Product ID — one product per tier, with recurring + metered
+   * prices bundled (Polar's model). `null` on the free tier.
+   */
+  polarProductId: string | null;
   includedCalls: number;
   /** `Infinity` represents "unmetered" for the agent quota. */
   maxAgents: number;
@@ -28,6 +33,13 @@ export type Plan = {
   overageRatePerCall: number;
 };
 
+// Strict provider gating: when POLAR_SDK is off, Polar product IDs are
+// forced to `null` in the live config (and vice versa), so even leftover
+// env values for the inactive provider can't be picked up by mistake.
+const usePolar = env.POLAR_SDK;
+const stripeId = (v: string | undefined) => (usePolar ? null : v ?? null);
+const polarId = (v: string | undefined) => (usePolar ? v ?? null : null);
+
 export const PLANS: Record<UserPlan, Plan> = {
   free: {
     key: 'free',
@@ -35,6 +47,7 @@ export const PLANS: Record<UserPlan, Plan> = {
     priceUsd: 0,
     priceId: null,
     overagePriceId: null,
+    polarProductId: null,
     includedCalls: 100,
     maxAgents: 1,
     allowPhone: false,
@@ -45,8 +58,9 @@ export const PLANS: Record<UserPlan, Plan> = {
     key: 'starter',
     displayName: 'Starter',
     priceUsd: 19,
-    priceId: env.STRIPE_STARTER_PRICE_ID ?? null,
-    overagePriceId: env.STRIPE_STARTER_OVERAGE_PRICE_ID ?? null,
+    priceId: stripeId(env.STRIPE_STARTER_PRICE_ID),
+    overagePriceId: stripeId(env.STRIPE_STARTER_OVERAGE_PRICE_ID),
+    polarProductId: polarId(env.POLAR_STARTER_PRODUCT_ID),
     includedCalls: 1000,
     maxAgents: 3,
     allowPhone: false,
@@ -57,8 +71,9 @@ export const PLANS: Record<UserPlan, Plan> = {
     key: 'pro',
     displayName: 'Pro',
     priceUsd: 49,
-    priceId: env.STRIPE_PRO_PRICE_ID ?? null,
-    overagePriceId: env.STRIPE_PRO_OVERAGE_PRICE_ID ?? null,
+    priceId: stripeId(env.STRIPE_PRO_PRICE_ID),
+    overagePriceId: stripeId(env.STRIPE_PRO_OVERAGE_PRICE_ID),
+    polarProductId: polarId(env.POLAR_PRO_PRODUCT_ID),
     includedCalls: 5000,
     maxAgents: 10,
     allowPhone: true,
@@ -69,8 +84,9 @@ export const PLANS: Record<UserPlan, Plan> = {
     key: 'business',
     displayName: 'Business',
     priceUsd: 149,
-    priceId: env.STRIPE_BUSINESS_PRICE_ID ?? null,
-    overagePriceId: env.STRIPE_BUSINESS_OVERAGE_PRICE_ID ?? null,
+    priceId: stripeId(env.STRIPE_BUSINESS_PRICE_ID),
+    overagePriceId: stripeId(env.STRIPE_BUSINESS_OVERAGE_PRICE_ID),
+    polarProductId: polarId(env.POLAR_BUSINESS_PRODUCT_ID),
     includedCalls: 25_000,
     maxAgents: Number.POSITIVE_INFINITY,
     allowPhone: true,
@@ -105,4 +121,15 @@ const PRICE_ID_TO_PLAN = new Map<string, UserPlan>(
 export function planFromPriceId(priceId: string | null | undefined): UserPlan | null {
   if (!priceId) return null;
   return PRICE_ID_TO_PLAN.get(priceId) ?? null;
+}
+
+const POLAR_PRODUCT_ID_TO_PLAN = new Map<string, UserPlan>(
+  (Object.values(PLANS) as Plan[])
+    .filter((p): p is Plan & { polarProductId: string } => !!p.polarProductId)
+    .map((p) => [p.polarProductId, p.key]),
+);
+
+export function planFromPolarProductId(productId: string | null | undefined): UserPlan | null {
+  if (!productId) return null;
+  return POLAR_PRODUCT_ID_TO_PLAN.get(productId) ?? null;
 }
